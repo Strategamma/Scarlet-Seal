@@ -42,7 +42,7 @@ export interface GameView {
   lastAction?: GameState['lastAction'];
 }
 
-export const tokenTarget = (count: number) => count === 2 ? 6 : count === 3 ? 5 : count === 4 ? 4 : 3;
+export const tokenTarget = (_count: number) => 3;
 
 export function makeDeck(): CardValue[] {
   return (Object.values(CARDS) as CardDef[]).flatMap(card => Array(card.count).fill(card.value));

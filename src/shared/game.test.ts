@@ -22,18 +22,36 @@ test('deck contains the full 21-card distribution', () => {
   assert.deepEqual([0,1,2,3,4,5,6,7,8,9].map(value => deck.filter(card => card === value).length), [2,6,2,2,2,2,2,1,1,1]);
 });
 
-test('games support six players and use the expanded evidence targets', () => {
+test('games support six players and every table needs three seals', () => {
   const six = Array.from({ length: 6 }, (_, index) => ({ id: String(index), name: `Player ${index}`, bot: false }));
   assert.equal(createGame(six, () => 0.2).players.length, 6);
-  assert.deepEqual([2, 3, 4, 5, 6].map(tokenTarget), [6, 5, 4, 3, 3]);
+  assert.deepEqual([2, 3, 4, 5, 6].map(tokenTarget), [3, 3, 3, 3, 3]);
 });
 
 test('player views never reveal an opponent hand', () => {
   const state = game();
+  state.players[1].discards = [0, 2, 4];
   const view = viewFor(state, 'a');
   assert.equal(view.hand.length, 2);
   assert.equal(view.players.find(p => p.id === 'b')?.handCount, 1);
   assert.equal('hand' in (view.players.find(p => p.id === 'b') as object), false);
+  assert.deepEqual(view.players.find(p => p.id === 'b')?.discards, [0, 2, 4]);
+});
+
+test('Wiretap has no immediate effect and finishes the turn normally', () => {
+  const state = game(); setTurn(state, [0, 4], 2);
+  playCard(state, 'a', { card: 0 }, () => 0);
+  assert.deepEqual(state.players[0].hand, [4]);
+  assert.deepEqual(state.players[0].discards, [0]);
+  assert.equal(state.turnIndex, 1);
+});
+
+test('Lead reveals privately before an empty deck ends the round', () => {
+  const state = game(); setTurn(state, [2, 4], 9);
+  state.deck = [];
+  playCard(state, 'a', { card: 2, targetId: 'b' }, () => 0);
+  assert.equal(state.privateNotice.a, 'Bea holds Scarlet Evidence.');
+  assert.equal(state.phase, 'round-over');
 });
 
 test('Red Herring is forced with Interrogation or Disguise', () => {
@@ -51,6 +69,15 @@ test('Hunch can identify the zero-value Wiretap', () => {
   assert.deepEqual(state.lastAction, { actorId: 'a', card: 1, targetId: 'b' });
 });
 
+test('the third seal ends a match immediately after the round resolves', () => {
+  const state = game(); setTurn(state, [1, 4], 2);
+  state.players[0].tokens = 2;
+  playCard(state, 'a', { card: 1, targetId: 'b', guess: 2 }, () => 0);
+  assert.equal(state.players[0].tokens, 3);
+  assert.equal(state.phase, 'match-over');
+  assert.deepEqual(state.matchWinnerIds, ['a']);
+});
+
 test('Interrogation exposing Scarlet Evidence eliminates its holder', () => {
   const state = game(); setTurn(state, [5, 4], 9);
   playCard(state, 'a', { card: 5, targetId: 'b' }, () => 0);
@@ -64,6 +91,27 @@ test('Safehouse removes protected players from target choices', () => {
   assert.deepEqual(legalMoves(state, 'a').filter(move => move.card === 1), [{ card: 1 }]);
 });
 
+test('Safehouse protection starts immediately and expires before the next draw', () => {
+  const state = game(); setTurn(state, [4, 2], 4);
+  state.deck = [1, 2, 3, 5];
+  playCard(state, 'a', { card: 4 }, () => 0);
+  assert.equal(state.players[0].protected, true);
+  playCard(state, 'b', { card: 4 }, () => 0);
+  assert.equal(state.turnIndex, 0);
+  assert.equal(state.players[0].protected, false);
+  assert.equal(state.players[0].hand.length, 2);
+});
+
+test('Interrogation discards and replaces a hand before the next turn draw', () => {
+  const state = game(); setTurn(state, [5, 4], 0);
+  state.setAside = 9;
+  state.deck = [2, 3, 6];
+  playCard(state, 'a', { card: 5, targetId: 'b' }, () => 0);
+  assert.deepEqual(state.players[1].discards, [0]);
+  assert.deepEqual(state.players[1].hand, [6, 3]);
+  assert.equal(state.setAside, 9);
+});
+
 test('Case Review pauses for a private choice and returns cards to the bottom', () => {
   const state = game(); setTurn(state, [6, 9], 4);
   state.deck = [2, 3];
@@ -75,6 +123,26 @@ test('Case Review pauses for a private choice and returns cards to the bottom', 
   assert.deepEqual(state.players[0].hand, [9]);
   assert.equal(state.pendingBottom, undefined);
   assert.equal(state.turnIndex, 1);
+});
+
+test('Disguise swaps hands immediately, then the next player draws', () => {
+  const state = game(); setTurn(state, [7, 2], 8);
+  playCard(state, 'a', { card: 7, targetId: 'b' }, () => 0);
+  assert.deepEqual(state.players[0].hand, [8]);
+  assert.deepEqual(state.players[1].hand, [2, 5]);
+  assert.equal(state.turnIndex, 1);
+});
+
+test('Red Herring resolves with no effect and Scarlet Evidence eliminates immediately', () => {
+  const redHerring = game(); setTurn(redHerring, [8, 2], 3);
+  playCard(redHerring, 'a', { card: 8 }, () => 0);
+  assert.deepEqual(redHerring.players[0].hand, [2]);
+  assert.equal(redHerring.turnIndex, 1);
+
+  const evidence = game(); setTurn(evidence, [9, 4], 2);
+  playCard(evidence, 'a', { card: 9 }, () => 0);
+  assert.equal(evidence.players[0].eliminated, true);
+  assert.equal(evidence.phase, 'round-over');
 });
 
 test('a sole surviving Wiretap user gains bonus evidence as well as a round token', () => {

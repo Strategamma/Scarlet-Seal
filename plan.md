@@ -1,7 +1,7 @@
 # Plan
 
-- Goal: make every game surface vivid, legible, animated, and navigable on mobile.
-- Scope: illustrated cards, deck-copy counts, opponent played cards, attributed action history, action motion, dialogs/tooltips, and page navigation.
-- Approach: use one optimized portrait atlas, add public last-action state, enrich card markup/history, and add responsive menu/exit controls without changing core rules.
-- Risks: hiding card text at small sizes, animation noise, sprite alignment, modal focus, and six-seat vertical crowding.
-- Verification: rules/room tests, production build, live six-seat play, and Playwright screenshots/text/error review at phone and desktop sizes.
+- Goal: bug-audit card timing and make the complete public game state usable at six seats.
+- Scope: every card ability, universal three-seal match target, six-seat lobby/table layout, and complete played/discarded-card visibility.
+- Approach: add focused timing tests, remove duplicate UI actions, expose compact labeled discard lanes for every player, and keep hands/private Case Review choices hidden.
+- Risks: resolving an effect after round-end checks, losing zero-value cards in truthy checks, and crowding the phone table with six discard histories.
+- Verification: per-card timing tests, room-capacity tests, build/typecheck, live six-seat network round, and required browser QA attempt.

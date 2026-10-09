@@ -23,6 +23,9 @@ Original prompt: I want to build a mobile PWA game based on the board game love 
 - Added a vibrant original 10-subject detective portrait atlas and redesigned every card with character art, prominent value/ability, and bottom-right deck copy count. The rule reference reuses the same portraits.
 - Opponents now retain a visible last-played mini card, targets highlight, the action feed names targets, and card-play/status animations respect reduced-motion. Added responsive Home navigation plus an accessible leave confirmation; leaving an active game forfeits cleanly instead of stalling the turn.
 - Verification: 15/15 tests and production build pass; the portrait atlas is PWA-precached; a live 1-human/5-bot round completed with target-rich last-action state. Required Playwright and the app browser were both attempted, but macOS browser process policy blocked page launch, so screenshot inspection remains the only outstanding QA item.
+- Bug audit expanded coverage to every card's resolution timing, protection expiry, deck-empty order, zero-value handling, the third-seal match transition, and six-bot completion. All 22 tests and the production build pass.
+- All table sizes now win at exactly three seals. Replaced last-card-only opponent displays with a labeled, horizontally scrollable public-card rail containing every player's full discard history plus the two-player face-up removed cards. Two simultaneous clients receive identical public piles while opponent hands remain redacted.
+- Required Playwright QA was retried after these changes; Chromium is still blocked before page load by the host macOS Mach port policy.
 
 ## TODO
 

@@ -17,7 +17,7 @@ Rooms use short join codes and work identically over the deployed internet origi
 
 ## Rules and conventions
 
-The 21-card deck uses values 0–9 and original detective names. Wiretap grants bonus evidence to its sole surviving user; Case Review privately draws up to two cards and returns the same number to the deck. Evidence targets: 2 players = 6, 3 = 5, 4 = 4, 5–6 = 3. Game logic must remain deterministic under an injected RNG and must not leak hidden cards or choices in public state.
+The 21-card deck uses values 0–9 and original detective names. Wiretap grants a bonus seal to its sole surviving user; Case Review privately draws up to two cards and returns the same number to the deck. Every table requires exactly three seals to win. All played, effect-discarded, elimination-discarded, and two-player face-up removed cards are public; hands, the facedown set-aside card, and Case Review returns stay private. Game logic must remain deterministic under an injected RNG.
 
 Use Node 20+. Commands: `npm run dev`, `npm test`, `npm run build`, `npm start`. Production expects a reverse proxy with WebSocket upgrades and HTTPS. Set `PORT` as needed.
 
@@ -25,4 +25,4 @@ Production: `https://scarlet-seal.onrender.com/`, one Render Docker web service 
 
 ## Current state
 
-Live playable vertical slice: quick solo start, create/join lobbies, configurable bots, reconnect identity, complete card actions, round/match scoring, mobile PWA shell, and production server. UI guidance derives from server-supplied legal moves. Opponent discard displays and the public action feed derive from authoritative `lastAction`; never expose hands. Motion emphasizes plays/targets and respects reduced-motion. Rules and exit confirmation are keyboard-navigable modal surfaces.
+Live playable vertical slice: quick solo start, create/join lobbies, configurable bots, reconnect identity, complete card actions, round/match scoring, mobile PWA shell, and production server. UI guidance derives from server-supplied legal moves. The horizontally scrollable public-card rail groups every visible discard by player and includes two-player face-up removals. Motion emphasizes plays/targets and respects reduced-motion. Rules and exit confirmation are keyboard-navigable modal surfaces.
