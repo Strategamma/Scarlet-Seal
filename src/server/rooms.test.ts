@@ -35,6 +35,15 @@ test('two occupied seats are enough to start', () => {
   assert.equal(service.state(session).canStart, true);
 });
 
+test('available rooms expose only safe summaries for joinable lobbies', () => {
+  const { service, session } = setup();
+  service.addBot(session);
+  const [listed] = service.availableRooms().filter(room => room.code === session.roomCode);
+  assert.deepEqual(listed, { code: session.roomCode, hostName: 'Host', playerCount: 2, botCount: 1, maxPlayers: 6 });
+  service.start(session);
+  assert.equal(service.availableRooms().some(room => room.code === session.roomCode), false);
+});
+
 test('leaving a lobby removes the member cleanly', () => {
   const { service, session } = setup();
   service.addBot(session);

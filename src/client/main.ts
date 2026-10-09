@@ -1,7 +1,7 @@
 import { io, type Socket } from 'socket.io-client';
 import { registerSW } from 'virtual:pwa-register';
 import { CARDS, MAX_PLAYERS, tokenTarget, type CardValue, type Move } from '../shared/game';
-import type { ClientToServerEvents, Result, RoomView, ServerToClientEvents, Session } from '../shared/protocol';
+import type { AvailableRoom, ClientToServerEvents, Result, RoomView, ServerToClientEvents, Session } from '../shared/protocol';
 import './styles.css';
 
 declare global { interface Window { render_game_to_text: () => string; advanceTime: (ms: number) => void } }
@@ -19,6 +19,9 @@ let error = '';
 let busy = false;
 let lastAnimatedAction = 0;
 let animateAction = false;
+let availableRooms: AvailableRoom[] = [];
+let landingName = localStorage.getItem('scarlet-seal-name') ?? '';
+let landingCode = new URLSearchParams(location.search).get('room')?.toUpperCase() ?? '';
 const socket: Socket<ServerToClientEvents, ClientToServerEvents> = io({ auth: session ?? {} });
 
 registerSW({ immediate: true });
@@ -30,6 +33,14 @@ socket.on('room:state', value => {
   room = value; error = ''; selectedCard = undefined; selectedTarget = undefined; selectedBottom = []; render();
 });
 socket.on('connect_error', () => { error = 'Unable to reach the game server.'; render(); });
+const refreshRooms = () => socket.emit('rooms:list', result => {
+  if (!result.ok || room) return;
+  if (JSON.stringify(availableRooms) === JSON.stringify(result.value)) return;
+  availableRooms = result.value;
+  render();
+});
+socket.on('connect', refreshRooms);
+window.setInterval(refreshRooms, 3000);
 
 const emit = <T>(send: (callback: (result: Result<T>) => void) => void) => {
   busy = true; error = ''; render();
@@ -76,13 +87,16 @@ const leaveSheet = () => leaveOpen ? `<div class="dialog-backdrop"><section clas
 const logo = (className: string) => `<img class="${className}" src="/icon-192.png" alt="" aria-hidden="true">`;
 
 function landing(): string {
+  const roomRows = availableRooms.map(available => `<button type="button" class="room-row" data-join-room="${available.code}"><span class="room-identity"><b>${esc(available.hostName)}'s table</b><small>${available.code} · ${available.botCount ? `${available.botCount} bot${available.botCount === 1 ? '' : 's'}` : 'people only'}</small></span><span class="room-seats"><b>${available.playerCount}/${available.maxPlayers}</b><small>seats</small></span><span class="room-join">Sit down <i>›</i></span></button>`).join('');
   return `<main class="landing">
     <div class="landing-tools">${rulesButton()}</div>
-    <div class="crest">${logo('crest-logo')}</div><p class="eyebrow">A GAME OF DECEPTION &amp; DEDUCTION</p><h1>Scarlet<br><i>Seal</i></h1>
-    <p class="intro">Crack the case with friends or challenge the detective bots. Two to six seats, one quick game.</p>
-    <form id="create-form" class="panel"><label>Your name<input name="name" maxlength="20" autocomplete="nickname" placeholder="Detective Violet" required></label><div class="home-actions"><button type="button" id="quick-play" class="primary" ${busy ? 'disabled' : ''}><span>Play now</span><small>Start with 1 bot</small></button><button class="secondary" ${busy ? 'disabled' : ''}>Create a room</button></div></form>
-    <div class="or"><span>or join a friend</span></div>
-    <form id="join-form" class="panel join"><label>Room code<input name="code" maxlength="5" autocomplete="off" autocapitalize="characters" placeholder="ABCDE" required></label><label>Your name<input name="name" maxlength="20" autocomplete="nickname" placeholder="Your name" required></label><button class="secondary" ${busy ? 'disabled' : ''}>Join room</button></form>
+    <section class="home-hero"><div class="crest">${logo('crest-logo')}</div><div><p class="eyebrow">A GAME OF DECEPTION &amp; DEDUCTION</p><h1>Scarlet <i>Seal</i></h1><p class="intro">Start a case now, or sit down at a nearby table.</p></div></section>
+    <button type="button" id="quick-play" class="primary quick-play" ${busy ? 'disabled' : ''}><span><b>Play against a bot</b><small>No name or setup needed</small></span><i>›</i></button>
+    <form id="lan-form" class="lan-panel"><div class="section-heading"><div><p class="eyebrow">LAN TABLES</p><h2>Play with people nearby</h2></div><span class="live-dot">Live</span></div><label>Your name<input name="name" maxlength="20" autocomplete="nickname" placeholder="Detective Violet" value="${esc(landingName)}" required></label>
+      <div class="available-rooms">${roomRows || '<div class="empty-rooms"><b>No tables are waiting yet</b><small>Create one and others on this network can join.</small></div>'}</div>
+      <button type="submit" id="create-room" class="secondary" ${busy ? 'disabled' : ''}>Create a new table</button>
+      <div class="code-join"><label>Have a room code?<input name="code" maxlength="5" autocomplete="off" autocapitalize="characters" placeholder="ABCDE" value="${esc(landingCode)}"></label><button type="button" id="join-code" class="secondary" ${busy ? 'disabled' : ''}>Join</button></div>
+    </form>
     ${error ? `<p class="error" role="alert">${esc(error)}</p>` : ''}
   </main>${rulesSheet()}`;
 }
@@ -156,9 +170,14 @@ function bind(): void {
   document.querySelectorAll('[data-open-rules]').forEach(el => el.addEventListener('click', () => { rulesOpen = true; render(); requestAnimationFrame(() => document.querySelector<HTMLElement>('#close-rules')?.focus()); }));
   document.querySelector('#close-rules')?.addEventListener('click', () => { rulesOpen = false; render(); });
   document.querySelector('.rules-backdrop')?.addEventListener('click', e => { if (e.target === e.currentTarget) { rulesOpen = false; render(); } });
-  document.querySelector<HTMLFormElement>('#create-form')?.addEventListener('submit', e => { e.preventDefault(); const data = new FormData(e.currentTarget as HTMLFormElement); emit(cb => socket.emit('room:create', String(data.get('name')), cb)); });
-  document.querySelector('#quick-play')?.addEventListener('click', () => { const form = document.querySelector<HTMLFormElement>('#create-form')!; if (!form.reportValidity()) return; quickPlay(String(new FormData(form).get('name'))); });
-  document.querySelector<HTMLFormElement>('#join-form')?.addEventListener('submit', e => { e.preventDefault(); const data = new FormData(e.currentTarget as HTMLFormElement); emit(cb => socket.emit('room:join', { code: String(data.get('code')), name: String(data.get('name')) }, cb)); });
+  const lanForm = document.querySelector<HTMLFormElement>('#lan-form');
+  lanForm?.querySelector<HTMLInputElement>('input[name=name]')?.addEventListener('input', event => { landingName = (event.currentTarget as HTMLInputElement).value; });
+  lanForm?.querySelector<HTMLInputElement>('input[name=code]')?.addEventListener('input', event => { landingCode = (event.currentTarget as HTMLInputElement).value.toUpperCase(); });
+  const joinRoom = (code: string) => { if (!lanForm?.reportValidity()) return; const data = new FormData(lanForm); localStorage.setItem('scarlet-seal-name', String(data.get('name'))); emit(cb => socket.emit('room:join', { code, name: String(data.get('name')) }, cb)); };
+  lanForm?.addEventListener('submit', e => { e.preventDefault(); const data = new FormData(e.currentTarget as HTMLFormElement); localStorage.setItem('scarlet-seal-name', String(data.get('name'))); emit(cb => socket.emit('room:create', String(data.get('name')), cb)); });
+  document.querySelector('#quick-play')?.addEventListener('click', () => quickPlay('You'));
+  document.querySelector('#join-code')?.addEventListener('click', () => { const code = lanForm?.querySelector<HTMLInputElement>('input[name=code]'); if (!code?.value.trim()) { code?.focus(); code?.setCustomValidity('Enter a room code.'); code?.reportValidity(); code?.setCustomValidity(''); return; } joinRoom(code.value); });
+  document.querySelectorAll<HTMLElement>('[data-join-room]').forEach(el => el.addEventListener('click', () => joinRoom(el.dataset.joinRoom!)));
   document.querySelector('#add-bot')?.addEventListener('click', () => emit(cb => socket.emit('room:add-bot', cb)));
   document.querySelectorAll<HTMLElement>('[data-remove-bot]').forEach(el => el.addEventListener('click', () => emit(cb => socket.emit('room:remove-bot', el.dataset.removeBot!, cb))));
   document.querySelector('#start')?.addEventListener('click', () => emit(cb => socket.emit('game:start', cb)));
@@ -186,7 +205,7 @@ window.render_game_to_text = () => {
   const me = game?.players.find(player => player.id === session?.playerId);
   return JSON.stringify({
     coordinateSystem: 'DOM interface ordered top-to-bottom; no spatial playfield',
-    screen: !room ? 'home' : !game ? 'lobby' : 'game', rulesOpen, roomCode: room?.code,
+    screen: !room ? 'home' : !game ? 'lobby' : 'game', rulesOpen, roomCode: room?.code, availableRooms,
     phase: game?.phase, round: game?.round, deckCount: game?.deckCount,
     turnPlayerId: game?.turnPlayerId, playerId: me?.id, hand: game?.hand,
     selectedCard, selectedTarget, selectedBottom, legalMoves: game?.legalMoves, bottomChoiceCount: game?.bottomChoiceCount,
@@ -202,6 +221,4 @@ document.addEventListener('keydown', async e => {
   if (e.key.toLowerCase() === 'f' && !['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) { if (document.fullscreenElement) await document.exitFullscreen(); else await document.documentElement.requestFullscreen(); }
 });
 
-const inviteCode = new URLSearchParams(location.search).get('room');
 render();
-if (inviteCode) requestAnimationFrame(() => { const input = document.querySelector<HTMLInputElement>('#join-form input[name=code]'); if (input) input.value = inviteCode.toUpperCase(); });

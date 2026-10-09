@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import type { Socket } from 'socket.io';
 import { chooseBotMove, chooseBotReturns, createGame, forfeitPlayer, MAX_PLAYERS, playCard, returnCardsToBottom, startRound, viewFor, type CardValue, type GameState, type Move } from '../shared/game.js';
-import type { ClientToServerEvents, RoomView, ServerToClientEvents, Session } from '../shared/protocol.js';
+import type { AvailableRoom, ClientToServerEvents, RoomView, ServerToClientEvents, Session } from '../shared/protocol.js';
 
 type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
 interface Member { id: string; token: string; name: string; bot: boolean; connected: boolean; socketId?: string }
@@ -138,6 +138,19 @@ export class RoomService {
   state(session: Session): RoomView {
     const { room } = this.authenticate(session);
     return this.view(room, session.playerId);
+  }
+
+  availableRooms(): AvailableRoom[] {
+    return [...rooms.values()]
+      .filter(room => !room.game && room.members.length < MAX_PLAYERS && room.members.some(member => !member.bot))
+      .map(room => ({
+        code: room.code,
+        hostName: room.members.find(member => member.id === room.hostId)?.name ?? 'Unknown host',
+        playerCount: room.members.length,
+        botCount: room.members.filter(member => member.bot).length,
+        maxPlayers: MAX_PLAYERS
+      }))
+      .sort((left, right) => right.playerCount - left.playerCount || left.code.localeCompare(right.code));
   }
 
   private authenticate(session: Session): { room: Room; member: Member } {

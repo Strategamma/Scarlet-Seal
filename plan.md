@@ -1,7 +1,7 @@
 # Plan
 
-- Goal: make every opponent action immediately understandable and visually original.
-- Scope: persistent played-card presentation, explicit actor/target labels, ten distinct card animations, and non-royal detective likenesses.
-- Approach: add a compact center action stage driven by authoritative `lastAction`, map one animation class per card value, and replace the portrait atlas with original urban investigators and evidence objects.
-- Risks: repeated rerenders restarting motion, overlaying the hand on short phones, unclear untargeted actions, and sprite-grid alignment.
-- Verification: tests/build, targeted and untargeted six-seat network actions, reduced-motion audit, portrait inspection, and required Playwright attempt.
+- Goal: get solo and LAN players into games from the home screen with fewer decisions and taps.
+- Scope: one-tap bot play, one shared multiplayer name, and a list of joinable waiting rooms with code fallback.
+- Approach: expose safe lobby summaries through the existing Socket.IO service, render them as join actions, and keep identity only in the multiplayer section.
+- Risks: stale room listings, accidentally exposing private game state, full/started rooms changing before join, and cramped mobile layout.
+- Verification: room-list service tests, full tests/build, and Playwright checks for solo, room creation, visible-room join, code join, responsive layout, and console errors.

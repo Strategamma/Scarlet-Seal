@@ -23,6 +23,7 @@ io.on('connection', socket => {
   };
   socket.on('room:create', (name, cb) => attempt(cb, () => { session = service.create(socket, name); socket.emit('session', session); return session; }));
   socket.on('room:join', (input, cb) => attempt(cb, () => { session = service.join(socket, input.code, input.name); socket.emit('session', session); return session; }));
+  socket.on('rooms:list', cb => attempt(cb, () => service.availableRooms()));
   socket.on('room:add-bot', cb => attempt(cb, () => { if (!session) throw new Error('Join a room first.'); service.addBot(session); return true as const; }));
   socket.on('room:remove-bot', (botId, cb) => attempt(cb, () => { if (!session) throw new Error('Join a room first.'); service.removeBot(session, botId); return true as const; }));
   socket.on('room:leave', cb => attempt(cb, () => { if (!session) throw new Error('Join a room first.'); service.leave(session); session = undefined; return true as const; }));
