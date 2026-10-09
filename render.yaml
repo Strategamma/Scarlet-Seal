@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: scarlet-seal
+    runtime: docker
+    repo: https://github.com/Strategamma/Scarlet-Seal
+    branch: main
+    region: singapore
+    plan: free
+    numInstances: 1
+    healthCheckPath: /health
+    autoDeployTrigger: checksPass
+    domains:
+      - scarletseal.decadenceinc.com

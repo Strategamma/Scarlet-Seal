@@ -24,6 +24,19 @@ Point `decadenceinc.com` (or a game subdomain) to the host and reverse-proxy HTT
 
 Rooms are stored in memory in this first version. Use one server process; restarting it clears active rooms. Durable rooms or horizontal scaling will require a shared store such as Redis.
 
+### Render
+
+The repository includes `render.yaml` for a single Docker web service in Render's Singapore region. It serves both the PWA and Socket.IO, uses `/health` for health checks, and declares `scarletseal.decadenceinc.com` as its custom domain.
+
+After the GitHub repository is pushed:
+
+1. In Render, create a new Blueprint from `Strategamma/Scarlet-Seal`.
+2. Approve the `scarlet-seal` web service.
+3. In the DNS provider for `decadenceinc.com`, add the CNAME value shown by Render for `scarletseal`.
+4. Wait for Render to verify the domain and issue TLS.
+
+Players on any internet connection—including devices sharing Wi-Fi—can use the Render URL. For internet-free same-Wi-Fi play, run the app locally and have devices open the host computer's LAN address.
+
 ## Checks
 
 ```bash

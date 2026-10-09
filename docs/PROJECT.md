@@ -21,6 +21,8 @@ Classic 1–8 deck distribution (5 Guards, 2 Priests, 2 Barons, 2 Handmaids, 2 P
 
 Use Node 20+. Commands: `npm run dev`, `npm test`, `npm run build`, `npm start`. Production expects a reverse proxy with WebSocket upgrades and HTTPS. Set `PORT` as needed.
 
+Production target: one Render Docker web service in Singapore, configured by `render.yaml`, with `scarletseal.decadenceinc.com` as the custom domain. Keep one instance while rooms are in memory; add shared room state before horizontal scaling.
+
 ## Current state
 
 Playable vertical slice: quick solo start, create/join lobbies, configurable bots, reconnect identity, complete card actions, round/match scoring, mobile PWA shell, and production server. UI guidance must be derived from server-supplied legal moves. A reusable bottom-sheet rulebook is available from home, lobby, and gameplay; keep rule details out of the core playfield except for the current action prompt.
