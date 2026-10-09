@@ -3,6 +3,7 @@
 Scarlet Seal is an original detective-themed, mobile-first, installable deduction card game. The repository is a TypeScript monorepo-shaped app without workspace complexity: Vite serves the client, Express serves production assets, and Socket.IO carries lobby/game events.
 
 Canonical source: `https://github.com/Strategamma/Scarlet-Seal`, branch `main`.
+Canonical local repository: `/Users/farzan/Documents/Codex/Scarlet Seal/Scarlet-Seal`. Make all project edits and run all Git commands from this nested folder; the similarly named parent folder is not the GitHub repository.
 
 ## Architecture
 
