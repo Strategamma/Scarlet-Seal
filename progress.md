@@ -26,6 +26,10 @@ Original prompt: I want to build a mobile PWA game based on the board game love 
 - Bug audit expanded coverage to every card's resolution timing, protection expiry, deck-empty order, zero-value handling, the third-seal match transition, and six-bot completion. All 22 tests and the production build pass.
 - All table sizes now win at exactly three seals. Replaced last-card-only opponent displays with a labeled, horizontally scrollable public-card rail containing every player's full discard history plus the two-player face-up removed cards. Two simultaneous clients receive identical public piles while opponent hands remain redacted.
 - Required Playwright QA was retried after these changes; Chromium is still blocked before page load by the host macOS Mach port policy.
+- Added a persistent actor → full card → target action stage with ability text and public resolution outcome. Every seat now clearly shows TAKING TURN, ALIVE, or OUT; the turn banner names the active player.
+- Added ten distinct card animations: signal pulse, hunch snap, lead slide, alibi balance, safehouse lock, interrogation slam, case-review fan, disguise flip, red-herring swerve, and evidence reveal. Reduced-motion disables all nonessential motion.
+- Replaced the portrait set with `detective-card-atlas-v2.png`, an original diverse urban-mystery ensemble with no royal/court likenesses. Generated through the built-in image tool and visually inspected after project optimization.
+- Verification: 23/23 tests and production build pass; a live six-seat action exposed actor/card/target/resolution and public discard while all alive states remained accurate. Playwright was retried but remains blocked by the macOS Mach port policy.
 
 ## TODO
 

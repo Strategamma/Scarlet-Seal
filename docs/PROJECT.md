@@ -11,7 +11,7 @@ Canonical source: `https://github.com/Strategamma/Scarlet-Seal`, branch `main`.
 - `src/client/`: DOM UI and Socket.IO client. No canvas engine; text-heavy card UI stays accessible and responsive.
 - `public/`: PWA manifest and static artwork.
 
-Brand palette: scarlet `#A51D35`, warm beige `#F3E6D0`, oxblood shadows, antique gold, and teal accents. The circular wax-seal logo is the canonical app mark. Cards use the original 5×2 `detective-card-atlas.png`; text, values, and copy counts remain HTML for responsive clarity and accessibility.
+Brand palette: scarlet `#A51D35`, warm beige `#F3E6D0`, oxblood shadows, antique gold, and teal accents. The circular wax-seal logo is the canonical app mark. Cards use the original urban-mystery 5×2 `detective-card-atlas-v2.png`; text, values, and copy counts remain HTML for responsive clarity and accessibility. Avoid royal, courtly, or fantasy likenesses.
 
 Rooms use short join codes and work identically over the deployed internet origin or a server's LAN URL. State is memory-only, so rooms disappear on restart. Tables contain 2–6 seats in any human/bot mix, with at least one human; one human may quick-start against a bot or add up to five bots.
 
@@ -25,4 +25,4 @@ Production: `https://scarlet-seal.onrender.com/`, one Render Docker web service 
 
 ## Current state
 
-Live playable vertical slice: quick solo start, create/join lobbies, configurable bots, reconnect identity, complete card actions, round/match scoring, mobile PWA shell, and production server. UI guidance derives from server-supplied legal moves. The horizontally scrollable public-card rail groups every visible discard by player and includes two-player face-up removals. Motion emphasizes plays/targets and respects reduced-motion. Rules and exit confirmation are keyboard-navigable modal surfaces.
+Live playable vertical slice: quick solo start, create/join lobbies, configurable bots, reconnect identity, complete card actions, round/match scoring, mobile PWA shell, and production server. UI guidance derives from server-supplied legal moves. A persistent actor → illustrated card → target stage includes a public resolution summary; each card value has distinct motion and monotonic action sequence. Seats explicitly show taking-turn, alive, or out. The public-card rail retains every visible discard and two-player face-up removal. Motion respects reduced-motion. Rules and exit confirmation are keyboard-navigable modal surfaces.

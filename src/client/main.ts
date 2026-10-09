@@ -17,11 +17,18 @@ let rulesOpen = false;
 let leaveOpen = false;
 let error = '';
 let busy = false;
+let lastAnimatedAction = 0;
+let animateAction = false;
 const socket: Socket<ServerToClientEvents, ClientToServerEvents> = io({ auth: session ?? {} });
 
 registerSW({ immediate: true });
 socket.on('session', value => { session = value; localStorage.setItem('scarlet-seal-session', JSON.stringify(value)); });
-socket.on('room:state', value => { room = value; error = ''; selectedCard = undefined; selectedTarget = undefined; selectedBottom = []; render(); });
+socket.on('room:state', value => {
+  const sequence = value.game?.lastAction?.sequence ?? 0;
+  animateAction = sequence > 0 && sequence !== lastAnimatedAction;
+  if (sequence) lastAnimatedAction = sequence;
+  room = value; error = ''; selectedCard = undefined; selectedTarget = undefined; selectedBottom = []; render();
+});
 socket.on('connect_error', () => { error = 'Unable to reach the game server.'; render(); });
 
 const emit = <T>(send: (callback: (result: Result<T>) => void) => void) => {
@@ -127,20 +134,21 @@ function game(): string {
   const winnerNames = winningIds.map(id => game.players.find(p => p.id === id)?.name).filter(Boolean).join(' & ');
   const lastActor = game.players.find(p => p.id === game.lastAction?.actorId);
   const lastTarget = game.players.find(p => p.id === game.lastAction?.targetId);
-  const actionFlash = game.lastAction && lastActor ? `<div class="action-flash" role="status">${art(game.lastAction.card, 'flash-art')}<span><small>${esc(lastActor.name)} played</small><b>${CARDS[game.lastAction.card].name}</b>${lastTarget ? `<em>on ${esc(lastTarget.name)}</em>` : ''}</span></div>` : '';
+  const actionStage = game.lastAction && lastActor ? `<section class="action-stage action-${game.lastAction.card} ${animateAction ? 'animate' : ''}" aria-live="polite"><div class="action-person actor"><span class="target-avatar">${lastActor.bot ? '⚙' : esc(lastActor.name[0])}</span><small>PLAYED BY</small><b>${lastActor.id === me.id ? 'You' : esc(lastActor.name)}</b></div><div class="featured-play">${art(game.lastAction.card, 'featured-art')}<strong>${game.lastAction.card}</strong><span><b>${CARDS[game.lastAction.card].name}</b><small>${CARDS[game.lastAction.card].text}</small></span></div><div class="action-arrow" aria-hidden="true">${lastTarget ? '➜' : '✦'}</div><div class="action-person target"><span class="target-avatar">${lastTarget ? (lastTarget.bot ? '⚙' : esc(lastTarget.name[0])) : '◎'}</span><small>${lastTarget ? 'TARGETED' : 'AFFECTED'}</small><b>${lastTarget ? (lastTarget.id === me.id ? 'You' : esc(lastTarget.name)) : 'The case'}</b></div><p class="action-resolution">${esc(game.lastAction.resolution)}</p></section>` : `<section class="action-stage waiting"><p>No cards played yet</p></section>`;
   const publicDiscards = `<section class="discard-board" aria-label="All public cards"><div class="discard-heading"><p class="eyebrow">PUBLIC CARDS</p><small>Use these to narrow the deck</small></div><div class="discard-lanes">${game.faceUpRemoved.length ? `<article class="discard-lane removed"><b>Set aside</b><div>${game.faceUpRemoved.map(value => `<span class="discard-chip art-${value}" title="${CARDS[value].name}, value ${value}"><i>${value}</i><small>${CARDS[value].name}</small></span>`).join('')}</div></article>` : ''}${game.players.map(player => `<article class="discard-lane ${game.lastAction?.targetId === player.id ? 'targeted' : ''}"><b>${player.id === me.id ? 'You' : esc(player.name)}</b><div>${player.discards.length ? player.discards.map((value, index) => `<span class="discard-chip art-${value} ${game.lastAction?.actorId === player.id && index === player.discards.length - 1 ? 'latest' : ''}" title="${CARDS[value].name}, value ${value}"><i>${value}</i><small>${CARDS[value].name}</small></span>`).join('') : '<em>None yet</em>'}</div></article>`).join('')}</div></section>`;
   const roundOverlay = game.phase !== 'playing' ? `<div class="overlay"><div class="result"><div class="crest">${logo('crest-logo')}</div><p class="eyebrow">${game.phase === 'match-over' ? 'CASE CLOSED' : `ROUND ${game.round} COMPLETE`}</p><h2>${esc(winnerNames || 'A rival')} ${winningIds.length > 1 ? 'win' : 'wins'}!</h2>${game.phase === 'round-over' && room!.players.find(p => p.id === me.id)?.host ? '<button id="next-round" class="primary">Deal next round</button>' : game.phase === 'round-over' ? '<p>Waiting for the host…</p>' : '<p>The case has found its sharpest detective.</p>'}</div></div>` : '';
   return `<main class="table"><header><span>Round ${game.round}</span><nav aria-label="Game navigation">${leaveButton()}${rulesButton('Rules')}</nav><span class="deck-count">Deck <b>${game.deckCount}</b></span></header>
-    <section class="opponents">${game.players.filter(p => p.id !== me.id).map(p => { const targeted = game.lastAction?.targetId === p.id; return `<div class="opponent ${p.eliminated ? 'out' : ''} ${targeted ? 'targeted' : ''}"><div class="avatar">${p.bot ? '⚙' : esc(p.name[0])}</div><b>${esc(p.name)}</b><span>${'◆'.repeat(p.tokens)}${p.protected ? ' · Shielded' : ''}</span><small>${p.eliminated ? 'OUT' : `${p.handCount} card`}</small></div>`; }).join('')}</section>
-    <section class="score-strip"><span>You</span><strong>${me.tokens} / ${tokenTarget(game.players.length)} seals</strong><span>to win</span></section>
-    <section class="turn-banner ${myTurn ? 'active' : ''}"><span class="turn-dot" aria-hidden="true"></span><div><small>${game.phase === 'playing' ? (myTurn ? 'YOUR TURN' : 'PLEASE WAIT') : 'ROUND COMPLETE'}</small><p>${game.phase === 'playing' ? instruction : 'The round has ended'}</p></div>${game.notice ? `<strong>${esc(game.notice)}</strong>` : ''}</section>
+    <section class="opponents">${game.players.filter(p => p.id !== me.id).map(p => { const targeted = game.lastAction?.targetId === p.id; const hasTurn = game.turnPlayerId === p.id && game.phase === 'playing'; return `<div class="opponent ${p.eliminated ? 'out' : 'alive'} ${targeted ? 'targeted' : ''} ${hasTurn ? 'current-turn' : ''}"><div class="avatar">${p.bot ? '⚙' : esc(p.name[0])}</div><b>${esc(p.name)}</b><span>${'◆'.repeat(p.tokens)}${p.protected ? ' · Shielded' : ''}</span><small class="life-state">${p.eliminated ? 'OUT' : hasTurn ? 'TAKING TURN' : 'ALIVE'}</small><small>${p.eliminated ? 'No hand' : `${p.handCount} card`}</small></div>`; }).join('')}</section>
+    ${actionStage}<section class="score-strip"><span>You</span><strong>${me.tokens} / ${tokenTarget(game.players.length)} seals</strong><span>to win</span></section>
+    <section class="turn-banner ${myTurn ? 'active' : ''}"><span class="turn-dot" aria-hidden="true"></span><div><small>${game.phase === 'playing' ? (myTurn ? 'YOUR TURN' : `${esc(turn?.name ?? 'Opponent')}'S TURN`) : 'ROUND COMPLETE'}</small><p>${game.phase === 'playing' ? instruction : 'The round has ended'}</p></div>${game.notice ? `<strong>${esc(game.notice)}</strong>` : ''}</section>
     ${publicDiscards}<section class="history" aria-label="Action history"><ol>${game.log.slice(-3).map(line => `<li>${esc(line)}</li>`).join('')}</ol></section>
     <section class="hand"><div class="hand-heading"><p class="eyebrow">YOUR HAND</p><span>${choosingBottom ? `${selectedBottom.length} of ${game.bottomChoiceCount} selected` : myTurn ? 'Tap a glowing card' : 'Hidden from rivals'}</span></div><div class="cards ${choosingBottom ? 'review-cards' : ''}">${game.hand.map((v, index) => card(v, index, choosingBottom || (myTurn && playable.has(v)), forcedCard === v, choosingBottom)).join('')}</div></section>
-    ${error ? `<p class="error">${esc(error)}</p>` : ''}${actionFlash}${action}${roundOverlay}</main>${rulesSheet()}${leaveSheet()}`;
+    ${error ? `<p class="error">${esc(error)}</p>` : ''}${action}${roundOverlay}</main>${rulesSheet()}${leaveSheet()}`;
 }
 
 function render(): void {
   root.innerHTML = !room ? landing() : room.game ? game() : lobby();
+  animateAction = false;
   bind();
 }
 
@@ -183,7 +191,7 @@ window.render_game_to_text = () => {
     turnPlayerId: game?.turnPlayerId, playerId: me?.id, hand: game?.hand,
     selectedCard, selectedTarget, selectedBottom, legalMoves: game?.legalMoves, bottomChoiceCount: game?.bottomChoiceCount,
     faceUpRemoved: game?.faceUpRemoved, players: game?.players.map(player => ({ id: player.id, name: player.name, tokens: player.tokens, protected: player.protected, eliminated: player.eliminated, handCount: player.handCount, discards: player.discards })),
-    recentLog: game?.log.slice(-3), notice: game?.notice
+    lastAction: game?.lastAction, recentLog: game?.log.slice(-3), notice: game?.notice
   });
 };
 window.advanceTime = () => {};

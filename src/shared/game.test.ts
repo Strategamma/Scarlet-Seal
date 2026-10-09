@@ -66,7 +66,15 @@ test('Hunch can identify the zero-value Wiretap', () => {
   assert.equal(state.players[1].eliminated, true);
   assert.equal(state.phase, 'round-over');
   assert.match(state.log[1], /Ada played Hunch on Bea/);
-  assert.deepEqual(state.lastAction, { actorId: 'a', card: 1, targetId: 'b' });
+  assert.deepEqual(state.lastAction, { sequence: 1, actorId: 'a', card: 1, targetId: 'b', resolution: 'Correct: Bea was eliminated.' });
+});
+
+test('Alibi compares remaining hands immediately and reports the eliminated player', () => {
+  const state = game(); setTurn(state, [3, 8], 2);
+  playCard(state, 'a', { card: 3, targetId: 'b' }, () => 0);
+  assert.equal(state.players[1].eliminated, true);
+  assert.equal(state.lastAction?.resolution, 'Ada won the comparison; Bea was eliminated.');
+  assert.equal(state.phase, 'round-over');
 });
 
 test('the third seal ends a match immediately after the round resolves', () => {
