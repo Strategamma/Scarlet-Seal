@@ -1,7 +1,7 @@
 # Plan
 
-- Goal: support a mobile-first 2–4 seat game with one to four humans and bots filling available seats.
-- Scope: one-tap solo-vs-bot, multiple configurable bots, mixed human/bot lobbies, and narrow-phone layouts.
-- Approach: extend the existing room protocol with bot removal, remove the one-bot restriction, keep the four-seat cap, and expose clear seat controls to the host.
-- Risks: bot-to-bot turn scheduling, lobby races during quick start, and cramped 320px layouts.
-- Verification: unit rules, production build, live 1-human/3-bot and mixed-room protocol playthroughs, plus browser screenshots when host policy permits.
+- Goal: make every game surface vivid, legible, animated, and navigable on mobile.
+- Scope: illustrated cards, deck-copy counts, opponent played cards, attributed action history, action motion, dialogs/tooltips, and page navigation.
+- Approach: use one optimized portrait atlas, add public last-action state, enrich card markup/history, and add responsive menu/exit controls without changing core rules.
+- Risks: hiding card text at small sizes, animation noise, sprite alignment, modal focus, and six-seat vertical crowding.
+- Verification: rules/room tests, production build, live six-seat play, and Playwright screenshots/text/error review at phone and desktop sizes.

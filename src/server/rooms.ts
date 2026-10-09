@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import type { Socket } from 'socket.io';
-import { chooseBotMove, createGame, playCard, startRound, viewFor, type GameState, type Move } from '../shared/game.js';
+import { chooseBotMove, chooseBotReturns, createGame, forfeitPlayer, MAX_PLAYERS, playCard, returnCardsToBottom, startRound, viewFor, type CardValue, type GameState, type Move } from '../shared/game.js';
 import type { ClientToServerEvents, RoomView, ServerToClientEvents, Session } from '../shared/protocol.js';
 
 type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
@@ -11,7 +11,7 @@ const rooms = new Map<string, Room>();
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const id = () => randomBytes(8).toString('hex');
 const token = () => randomBytes(18).toString('base64url');
-const BOT_NAMES = ['Lady Automata', 'Sir Logic', 'Countess Circuit'];
+const BOT_NAMES = ['Inspector Byte', 'Agent Cipher', 'Detective Dot', 'Constable Cache', 'Sleuth Zero'];
 function roomCode(): string {
   do {
     let value = '';
@@ -38,7 +38,7 @@ export class RoomService {
   join(socket: GameSocket, rawCode: string, rawName: string): Session {
     const room = this.get(rawCode);
     if (room.game) throw new Error('This game has already started.');
-    if (room.members.length >= 4) throw new Error('This room is full.');
+    if (room.members.length >= MAX_PLAYERS) throw new Error('This room is full.');
     const name = safeName(rawName);
     if (room.members.some(m => m.name.toLowerCase() === name.toLowerCase())) throw new Error('That name is already taken.');
     const member: Member = { id: id(), token: token(), name, bot: false, connected: true, socketId: socket.id };
@@ -62,7 +62,7 @@ export class RoomService {
     const { room, member } = this.authenticate(session);
     if (room.hostId !== member.id) throw new Error('Only the host can add a bot.');
     if (room.game) throw new Error('The game has already started.');
-    if (room.members.length >= 4) throw new Error('This room is full.');
+    if (room.members.length >= MAX_PLAYERS) throw new Error('This room is full.');
     const usedNames = new Set(room.members.map(existing => existing.name));
     const name = BOT_NAMES.find(candidate => !usedNames.has(candidate)) ?? `Court Bot ${room.members.filter(existing => existing.bot).length + 1}`;
     room.members.push({ id: id(), token: token(), name, bot: true, connected: true });
@@ -79,6 +79,22 @@ export class RoomService {
     this.push(room);
   }
 
+  leave(session: Session): void {
+    const { room, member } = this.authenticate(session);
+    if (room.game) {
+      member.connected = false; member.socketId = undefined;
+      const player = room.game.players.find(candidate => candidate.id === member.id);
+      if (player) { player.connected = false; forfeitPlayer(room.game, player.id); }
+      if (room.hostId === member.id) room.hostId = room.members.find(candidate => !candidate.bot && candidate.id !== member.id && candidate.connected)?.id ?? room.hostId;
+      this.push(room); this.scheduleBot(room);
+      return;
+    }
+    room.members = room.members.filter(candidate => candidate.id !== member.id);
+    if (!room.members.length) { rooms.delete(room.code); return; }
+    if (room.hostId === member.id) room.hostId = room.members.find(candidate => !candidate.bot)?.id ?? room.members[0].id;
+    this.push(room);
+  }
+
   start(session: Session): void {
     const { room, member } = this.authenticate(session);
     if (room.hostId !== member.id) throw new Error('Only the host can start.');
@@ -91,6 +107,13 @@ export class RoomService {
     const { room, member } = this.authenticate(session);
     if (!room.game) throw new Error('The game has not started.');
     playCard(room.game, member.id, move);
+    this.push(room); this.scheduleBot(room);
+  }
+
+  returnCards(session: Session, cards: CardValue[]): void {
+    const { room, member } = this.authenticate(session);
+    if (!room.game) throw new Error('The game has not started.');
+    returnCardsToBottom(room.game, member.id, cards);
     this.push(room); this.scheduleBot(room);
   }
 
@@ -148,7 +171,8 @@ export class RoomService {
       if (!room.game || room.game.phase !== 'playing') return;
       const bot = room.game.players[room.game.turnIndex];
       if (!bot.bot) return;
-      playCard(room.game, bot.id, chooseBotMove(room.game, bot.id));
+      if (room.game.pendingBottom?.playerId === bot.id) returnCardsToBottom(room.game, bot.id, chooseBotReturns(room.game, bot.id));
+      else playCard(room.game, bot.id, chooseBotMove(room.game, bot.id));
       this.push(room); this.scheduleBot(room);
     }, 700);
   }

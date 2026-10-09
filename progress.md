@@ -17,6 +17,12 @@ Original prompt: I want to build a mobile PWA game based on the board game love 
 - Required Playwright runner attempted again but macOS sandbox blocked Chromium before page load (`MachPortRendezvousServer: Permission denied`), so no screenshots could be produced or inspected in this environment.
 - Added one-tap solo-vs-bot startup, configurable add/remove bot lobby controls, unique bot names, and support for up to three bots alongside one human (four total seats). Added narrow-phone and short-screen layout rules.
 - Verification: 9/9 automated tests pass; production PWA build passes; a 1-human/3-bot live round observed all three bots and reached round-over; four independent human clients joined one room and started successfully. Playwright remains blocked before page load by the host macOS sandbox.
+- Re-themed the full card set as an original detective case: Wiretap, Hunch, Lead, Alibi, Safehouse, Interrogation, Case Review, Disguise, Red Herring, and Scarlet Evidence.
+- Expanded play to 2–6 seats with the 21-card distribution, six-player evidence targets, Wiretap bonus, private Case Review return flow, simultaneous winners, and five unique detective bots. The UI/rulebook and five-opponent mobile layout now reflect the expanded game.
+- Verification: 13/13 tests pass, including a complete six-bot round and both new card mechanics; production PWA build passes; a live 1-human/5-bot Socket.IO round reached round-over and awarded Wiretap bonus evidence correctly.
+- Added a vibrant original 10-subject detective portrait atlas and redesigned every card with character art, prominent value/ability, and bottom-right deck copy count. The rule reference reuses the same portraits.
+- Opponents now retain a visible last-played mini card, targets highlight, the action feed names targets, and card-play/status animations respect reduced-motion. Added responsive Home navigation plus an accessible leave confirmation; leaving an active game forfeits cleanly instead of stalling the turn.
+- Verification: 15/15 tests and production build pass; the portrait atlas is PWA-precached; a live 1-human/5-bot round completed with target-rich last-action state. Required Playwright and the app browser were both attempted, but macOS browser process policy blocked page launch, so screenshot inspection remains the only outstanding QA item.
 
 ## TODO
 

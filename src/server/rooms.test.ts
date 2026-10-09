@@ -10,15 +10,13 @@ function setup() {
   return { service, session, states };
 }
 
-test('a host can fill all four seats with bots', () => {
+test('a host can fill all six seats with bots', () => {
   const { service, session } = setup();
-  service.addBot(session);
-  service.addBot(session);
-  service.addBot(session);
+  for (let index = 0; index < 5; index++) service.addBot(session);
   const room = service.state(session);
-  assert.equal(room.players.length, 4);
-  assert.equal(room.players.filter(player => player.bot).length, 3);
-  assert.equal(new Set(room.players.map(player => player.name)).size, 4);
+  assert.equal(room.players.length, 6);
+  assert.equal(room.players.filter(player => player.bot).length, 5);
+  assert.equal(new Set(room.players.map(player => player.name)).size, 6);
   assert.throws(() => service.addBot(session), /room is full/i);
 });
 
@@ -35,4 +33,11 @@ test('two occupied seats are enough to start', () => {
   const { service, session } = setup();
   service.addBot(session);
   assert.equal(service.state(session).canStart, true);
+});
+
+test('leaving a lobby removes the member cleanly', () => {
+  const { service, session } = setup();
+  service.addBot(session);
+  service.leave(session);
+  assert.throws(() => service.state(session), /session is no longer valid/i);
 });

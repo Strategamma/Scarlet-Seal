@@ -1,6 +1,6 @@
 # Scarlet Seal
 
-A mobile-first PWA of deduction and royal intrigue. One person can play immediately against bots, or 2–4 total seats can contain any mix of people and bots.
+A mobile-first PWA of deception and deduction. One person can play immediately against a bot, or 2–6 total seats can contain any mix of people and bots.
 
 ## Run locally
 
@@ -11,7 +11,7 @@ npm run dev
 
 Open `http://localhost:5173`. For same-Wi‑Fi play, other devices open `http://YOUR-LAN-IP:5173`; the terminal running Vite prints the network address. Everyone then joins with the same five-character room code.
 
-Use **Play now** for an immediate one-person game against a bot. In a hosted room, the host can add or remove bots until the table has 2–4 occupied seats.
+Use **Play now** for an immediate one-person game against a bot. In a hosted room, the host can add or remove bots until the table has 2–6 occupied seats.
 
 ## Production
 

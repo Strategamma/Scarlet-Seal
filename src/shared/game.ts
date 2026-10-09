@@ -1,15 +1,20 @@
-export type CardValue = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+export const MIN_PLAYERS = 2;
+export const MAX_PLAYERS = 6;
+
+export type CardValue = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 
 export interface CardDef { value: CardValue; name: string; count: number; text: string }
 export const CARDS: Record<CardValue, CardDef> = {
-  1: { value: 1, name: 'Guard', count: 5, text: 'Guess another player’s card.' },
-  2: { value: 2, name: 'Priest', count: 2, text: 'Privately see another player’s card.' },
-  3: { value: 3, name: 'Baron', count: 2, text: 'Compare hands; lower value is eliminated.' },
-  4: { value: 4, name: 'Handmaid', count: 2, text: 'You are protected until your next turn.' },
-  5: { value: 5, name: 'Prince', count: 2, text: 'Choose a player to discard and redraw.' },
-  6: { value: 6, name: 'King', count: 1, text: 'Trade hands with another player.' },
-  7: { value: 7, name: 'Countess', count: 1, text: 'Must be played with the King or Prince.' },
-  8: { value: 8, name: 'Princess', count: 1, text: 'Playing or discarding this eliminates you.' }
+  0: { value: 0, name: 'Wiretap', count: 2, text: 'No immediate effect. A lone surviving user earns bonus evidence.' },
+  1: { value: 1, name: 'Hunch', count: 6, text: 'Name another card in a rival’s hand.' },
+  2: { value: 2, name: 'Lead', count: 2, text: 'Privately inspect another player’s hand.' },
+  3: { value: 3, name: 'Alibi', count: 2, text: 'Compare hands; the lower value is eliminated.' },
+  4: { value: 4, name: 'Safehouse', count: 2, text: 'Other players cannot target you until your next turn.' },
+  5: { value: 5, name: 'Interrogation', count: 2, text: 'Make any player discard their hand and redraw.' },
+  6: { value: 6, name: 'Case Review', count: 2, text: 'Draw two cards, keep one, and return the rest to the deck.' },
+  7: { value: 7, name: 'Disguise', count: 1, text: 'Trade hands with another player.' },
+  8: { value: 8, name: 'Red Herring', count: 1, text: 'Must be played with Disguise or Interrogation.' },
+  9: { value: 9, name: 'Scarlet Evidence', count: 1, text: 'Playing or discarding this eliminates you.' }
 };
 
 export interface Player {
@@ -20,7 +25,9 @@ export interface GameState {
   phase: 'lobby' | 'playing' | 'round-over' | 'match-over';
   players: Player[]; deck: CardValue[]; setAside?: CardValue; faceUpRemoved: CardValue[];
   turnIndex: number; round: number; log: string[]; privateNotice: Record<string, string>;
-  winnerIds: string[]; matchWinnerId?: string;
+  winnerIds: string[]; matchWinnerIds: string[];
+  lastAction?: { actorId: string; card: CardValue; targetId?: string };
+  pendingBottom?: { playerId: string; count: number };
 }
 export interface Move { card: CardValue; targetId?: string; guess?: CardValue }
 export interface PlayerView {
@@ -30,10 +37,12 @@ export interface PlayerView {
 export interface GameView {
   phase: GameState['phase']; players: PlayerView[]; hand: CardValue[]; deckCount: number;
   faceUpRemoved: CardValue[]; turnPlayerId?: string; round: number; log: string[];
-  notice?: string; winnerIds: string[]; matchWinnerId?: string; legalMoves: Move[];
+  notice?: string; winnerIds: string[]; matchWinnerIds: string[]; legalMoves: Move[];
+  bottomChoiceCount: number;
+  lastAction?: GameState['lastAction'];
 }
 
-export const tokenTarget = (count: number) => count === 2 ? 7 : count === 3 ? 5 : 4;
+export const tokenTarget = (count: number) => count === 2 ? 6 : count === 3 ? 5 : count === 4 ? 4 : 3;
 
 export function makeDeck(): CardValue[] {
   return (Object.values(CARDS) as CardDef[]).flatMap(card => Array(card.count).fill(card.value));
@@ -49,18 +58,18 @@ export function shuffle<T>(items: T[], rng: () => number = Math.random): T[] {
 }
 
 export function createGame(players: Pick<Player, 'id' | 'name' | 'bot'>[], rng = Math.random): GameState {
-  if (players.length < 2 || players.length > 4) throw new Error('A game needs 2–4 players.');
+  if (players.length < MIN_PLAYERS || players.length > MAX_PLAYERS) throw new Error(`A game needs ${MIN_PLAYERS}–${MAX_PLAYERS} players.`);
   const state: GameState = {
     phase: 'lobby', players: players.map(p => ({ ...p, hand: [], discards: [], tokens: 0, protected: false, eliminated: false, connected: true })),
-    deck: [], faceUpRemoved: [], turnIndex: 0, round: 0, log: [], privateNotice: {}, winnerIds: []
+    deck: [], faceUpRemoved: [], turnIndex: 0, round: 0, log: [], privateNotice: {}, winnerIds: [], matchWinnerIds: []
   };
   startRound(state, rng);
   return state;
 }
 
 export function startRound(state: GameState, rng = Math.random): void {
-  const previousWinnerId = state.winnerIds[0];
-  state.round += 1; state.phase = 'playing'; state.winnerIds = []; state.privateNotice = {};
+  const previousWinnerId = state.winnerIds[Math.floor(rng() * Math.max(state.winnerIds.length, 1))];
+  state.round += 1; state.phase = 'playing'; state.winnerIds = []; state.matchWinnerIds = []; state.privateNotice = {}; state.pendingBottom = undefined; state.lastAction = undefined;
   state.players.forEach(p => { p.hand = []; p.discards = []; p.protected = false; p.eliminated = false; });
   const deck = shuffle(makeDeck(), rng);
   state.setAside = deck.pop(); state.faceUpRemoved = state.players.length === 2 ? deck.splice(-3) : [];
@@ -86,21 +95,23 @@ function drawForTurn(state: GameState): void {
   const player = current(state);
   player.protected = false;
   const drawn = state.deck.pop();
-  if (drawn) player.hand.push(drawn);
+  if (drawn !== undefined) player.hand.push(drawn);
 }
 
 export function legalMoves(state: GameState, playerId: string): Move[] {
-  if (state.phase !== 'playing' || current(state).id !== playerId) return [];
+  if (state.phase !== 'playing' || state.pendingBottom || current(state).id !== playerId) return [];
   const actor = current(state);
   let playable = [...actor.hand];
-  if (actor.hand.includes(7) && actor.hand.some(v => v === 5 || v === 6)) playable = [7];
+  if (actor.hand.includes(8) && actor.hand.some(v => v === 5 || v === 7)) playable = [8];
   const moves: Move[] = [];
   for (const card of playable) {
     const others = targetable(state, actor.id);
     if (card === 1) {
       if (!others.length) moves.push({ card });
-      for (const target of others) for (let guess = 2; guess <= 8; guess++) moves.push({ card, targetId: target.id, guess: guess as CardValue });
-    } else if ([2, 3, 6].includes(card)) {
+      for (const target of others) {
+        for (const guess of Object.keys(CARDS).map(Number) as CardValue[]) if (guess !== 1) moves.push({ card, targetId: target.id, guess });
+      }
+    } else if ([2, 3, 7].includes(card)) {
       if (!others.length) moves.push({ card }); else others.forEach(target => moves.push({ card, targetId: target.id }));
     } else if (card === 5) {
       const choices = active(state).filter(p => p.id === actor.id || !p.protected);
@@ -118,37 +129,74 @@ export function playCard(state: GameState, playerId: string, move: Move, rng = M
   const actor = current(state);
   const index = actor.hand.indexOf(move.card);
   actor.hand.splice(index, 1); actor.discards.push(move.card);
-  const card = CARDS[move.card];
-  state.log.push(`${actor.name} played ${card.name}.`);
   const target = move.targetId ? state.players.find(p => p.id === move.targetId) : undefined;
+  state.lastAction = { actorId: actor.id, card: move.card, targetId: target?.id };
+  state.log.push(`${actor.name} played ${CARDS[move.card].name}${target ? ` on ${target.name}` : ''}.`);
 
-  if (move.card === 1 && target && move.guess) {
-    state.log.push(`${actor.name} guessed ${CARDS[move.guess].name} for ${target.name}.`);
-    if (target.hand[0] === move.guess) eliminate(state, target, 'the Guard guessed correctly');
+  if (move.card === 1 && target && move.guess !== undefined) {
+    state.log.push(`${actor.name} named ${CARDS[move.guess].name} for ${target.name}.`);
+    if (target.hand[0] === move.guess) eliminate(state, target, 'the Hunch was correct');
   } else if (move.card === 2 && target) {
-    state.privateNotice[actor.id] = `${target.name} holds the ${CARDS[target.hand[0]].name}.`;
+    state.privateNotice[actor.id] = `${target.name} holds ${CARDS[target.hand[0]].name}.`;
   } else if (move.card === 3 && target) {
     const a = actor.hand[0], b = target.hand[0];
-    if (a < b) eliminate(state, actor, `${target.name} won the comparison`);
-    if (b < a) eliminate(state, target, `${actor.name} won the comparison`);
-    if (a === b) state.log.push('The comparison was tied.');
+    if (a < b) eliminate(state, actor, `${target.name} had the stronger alibi`);
+    if (b < a) eliminate(state, target, `${actor.name} had the stronger alibi`);
+    if (a === b) state.log.push('The alibis were equally strong.');
   } else if (move.card === 4) {
     actor.protected = true;
   } else if (move.card === 5 && target) {
     const discarded = target.hand.splice(0, 1)[0];
     target.discards.push(discarded);
     state.log.push(`${target.name} discarded ${CARDS[discarded].name}.`);
-    if (discarded === 8) eliminate(state, target, 'the Princess was discarded');
+    if (discarded === 9) eliminate(state, target, 'Scarlet Evidence was exposed');
     else {
-      const replacement = state.deck.pop() ?? state.setAside;
-      state.setAside = undefined;
-      if (replacement) target.hand.push(replacement);
+      let replacement = state.deck.pop();
+      if (replacement === undefined) { replacement = state.setAside; state.setAside = undefined; }
+      if (replacement !== undefined) target.hand.push(replacement);
     }
-  } else if (move.card === 6 && target) {
+  } else if (move.card === 6) {
+    let drawn = 0;
+    while (drawn < 2 && state.deck.length) { actor.hand.push(state.deck.pop()!); drawn++; }
+    if (drawn) {
+      state.pendingBottom = { playerId: actor.id, count: drawn };
+      state.privateNotice[actor.id] = `Choose ${drawn} card${drawn === 1 ? '' : 's'} to return to the bottom of the deck.`;
+      return;
+    }
+  } else if (move.card === 7 && target) {
     [actor.hand, target.hand] = [target.hand, actor.hand];
-  } else if (move.card === 8) eliminate(state, actor, 'the Princess was played');
+  } else if (move.card === 9) eliminate(state, actor, 'Scarlet Evidence was played');
 
   finishTurn(state, rng);
+}
+
+export function returnCardsToBottom(state: GameState, playerId: string, cards: CardValue[], rng = Math.random): void {
+  const pending = state.pendingBottom;
+  if (!pending || pending.playerId !== playerId || current(state).id !== playerId) throw new Error('There are no cards to return.');
+  if (cards.length !== pending.count) throw new Error(`Choose exactly ${pending.count} card${pending.count === 1 ? '' : 's'}.`);
+  const actor = current(state);
+  const remaining = [...actor.hand];
+  for (const card of cards) {
+    const index = remaining.indexOf(card);
+    if (index < 0) throw new Error('That return choice is not valid.');
+    remaining.splice(index, 1);
+  }
+  if (remaining.length !== 1) throw new Error('Case Review must leave one card in your hand.');
+  actor.hand = remaining;
+  state.deck.unshift(...cards);
+  state.pendingBottom = undefined;
+  delete state.privateNotice[playerId];
+  state.log.push(`${actor.name} returned ${cards.length} card${cards.length === 1 ? '' : 's'} to the case file.`);
+  finishTurn(state, rng);
+}
+
+export function forfeitPlayer(state: GameState, playerId: string, rng = Math.random): void {
+  const player = state.players.find(candidate => candidate.id === playerId);
+  if (!player || state.phase !== 'playing' || player.eliminated) return;
+  const wasCurrent = current(state).id === playerId;
+  if (state.pendingBottom?.playerId === playerId) state.pendingBottom = undefined;
+  eliminate(state, player, 'they left the case');
+  if (wasCurrent || active(state).length <= 1) finishTurn(state, rng);
 }
 
 function finishTurn(state: GameState, rng: () => number): void {
@@ -160,17 +208,19 @@ function finishTurn(state: GameState, rng: () => number): void {
 function finishRound(state: GameState): void {
   const survivors = active(state);
   const bestHand = Math.max(...survivors.map(p => p.hand[0] ?? 0));
-  let winners = survivors.filter(p => (p.hand[0] ?? 0) === bestHand);
-  if (winners.length > 1) {
-    const bestDiscard = Math.max(...winners.map(p => p.discards.reduce((a, b) => a + b, 0)));
-    winners = winners.filter(p => p.discards.reduce((a, b) => a + b, 0) === bestDiscard);
-  }
+  const winners = survivors.filter(p => (p.hand[0] ?? 0) === bestHand);
   winners.forEach(p => p.tokens++);
   state.winnerIds = winners.map(p => p.id);
   state.log.push(`${winners.map(p => p.name).join(' & ')} won the round.`);
-  const matchWinner = winners.find(p => p.tokens >= tokenTarget(state.players.length));
-  if (matchWinner) { state.phase = 'match-over'; state.matchWinnerId = matchWinner.id; }
-  else state.phase = 'round-over';
+
+  const wiretapUsers = survivors.filter(p => p.discards.includes(0));
+  if (wiretapUsers.length === 1) {
+    wiretapUsers[0].tokens++;
+    state.log.push(`${wiretapUsers[0].name} earned bonus evidence from a lone Wiretap.`);
+  }
+
+  state.matchWinnerIds = state.players.filter(p => p.tokens >= tokenTarget(state.players.length)).map(p => p.id);
+  state.phase = state.matchWinnerIds.length ? 'match-over' : 'round-over';
 }
 
 export function viewFor(state: GameState, playerId: string): GameView {
@@ -181,14 +231,21 @@ export function viewFor(state: GameState, playerId: string): GameView {
     hand: viewer?.hand ?? [], deckCount: state.deck.length, faceUpRemoved: state.faceUpRemoved,
     turnPlayerId: state.phase === 'playing' ? current(state).id : undefined, round: state.round,
     log: state.log.slice(-8), notice: state.privateNotice[playerId], winnerIds: state.winnerIds,
-    matchWinnerId: state.matchWinnerId, legalMoves: legalMoves(state, playerId)
+    matchWinnerIds: state.matchWinnerIds, legalMoves: legalMoves(state, playerId), lastAction: state.lastAction,
+    bottomChoiceCount: state.pendingBottom?.playerId === playerId ? state.pendingBottom.count : 0
   };
 }
 
 export function chooseBotMove(state: GameState, playerId: string, rng = Math.random): Move {
   const moves = legalMoves(state, playerId);
   if (!moves.length) throw new Error('Bot has no legal move.');
-  const useful = moves.filter(m => m.card !== 8 && !(m.card === 5 && m.targetId === playerId));
+  const useful = moves.filter(m => m.card !== 9 && !(m.card === 5 && m.targetId === playerId));
   const pool = useful.length ? useful : moves;
   return pool[Math.floor(rng() * pool.length)];
+}
+
+export function chooseBotReturns(state: GameState, playerId: string): CardValue[] {
+  const pending = state.pendingBottom;
+  if (!pending || pending.playerId !== playerId) throw new Error('Bot has no cards to return.');
+  return [...current(state).hand].sort((a, b) => a - b).slice(0, pending.count);
 }

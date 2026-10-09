@@ -25,8 +25,10 @@ io.on('connection', socket => {
   socket.on('room:join', (input, cb) => attempt(cb, () => { session = service.join(socket, input.code, input.name); socket.emit('session', session); return session; }));
   socket.on('room:add-bot', cb => attempt(cb, () => { if (!session) throw new Error('Join a room first.'); service.addBot(session); return true as const; }));
   socket.on('room:remove-bot', (botId, cb) => attempt(cb, () => { if (!session) throw new Error('Join a room first.'); service.removeBot(session, botId); return true as const; }));
+  socket.on('room:leave', cb => attempt(cb, () => { if (!session) throw new Error('Join a room first.'); service.leave(session); session = undefined; return true as const; }));
   socket.on('game:start', cb => attempt(cb, () => { if (!session) throw new Error('Join a room first.'); service.start(session); return true as const; }));
   socket.on('game:play', (move, cb) => attempt(cb, () => { if (!session) throw new Error('Join a room first.'); service.play(session, move); return true as const; }));
+  socket.on('game:return-cards', (cards, cb) => attempt(cb, () => { if (!session) throw new Error('Join a room first.'); service.returnCards(session, cards); return true as const; }));
   socket.on('game:next-round', cb => attempt(cb, () => { if (!session) throw new Error('Join a room first.'); service.nextRound(session); return true as const; }));
   socket.on('disconnect', () => service.disconnect(socket.id));
 });

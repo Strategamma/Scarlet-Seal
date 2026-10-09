@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createGame, legalMoves, makeDeck, playCard, viewFor, type GameState } from './game.js';
+import { chooseBotMove, chooseBotReturns, createGame, forfeitPlayer, legalMoves, makeDeck, playCard, returnCardsToBottom, tokenTarget, viewFor, type GameState } from './game.js';
 
 const players = [
   { id: 'a', name: 'Ada', bot: false },
@@ -16,10 +16,16 @@ const setTurn = (state: GameState, hand: [number, number], other: number) => {
   state.phase = 'playing';
 };
 
-test('deck contains the classic 16-card distribution', () => {
+test('deck contains the full 21-card distribution', () => {
   const deck = makeDeck();
-  assert.equal(deck.length, 16);
-  assert.deepEqual([1,2,3,4,5,6,7,8].map(value => deck.filter(card => card === value).length), [5,2,2,2,2,1,1,1]);
+  assert.equal(deck.length, 21);
+  assert.deepEqual([0,1,2,3,4,5,6,7,8,9].map(value => deck.filter(card => card === value).length), [2,6,2,2,2,2,2,1,1,1]);
+});
+
+test('games support six players and use the expanded evidence targets', () => {
+  const six = Array.from({ length: 6 }, (_, index) => ({ id: String(index), name: `Player ${index}`, bot: false }));
+  assert.equal(createGame(six, () => 0.2).players.length, 6);
+  assert.deepEqual([2, 3, 4, 5, 6].map(tokenTarget), [6, 5, 4, 3, 3]);
 });
 
 test('player views never reveal an opponent hand', () => {
@@ -30,27 +36,73 @@ test('player views never reveal an opponent hand', () => {
   assert.equal('hand' in (view.players.find(p => p.id === 'b') as object), false);
 });
 
-test('Countess is forced when held with a Prince or King', () => {
-  const state = game(); setTurn(state, [7, 5], 2);
-  assert.ok(legalMoves(state, 'a').every(move => move.card === 7));
+test('Red Herring is forced with Interrogation or Disguise', () => {
+  const state = game(); setTurn(state, [8, 5], 2);
+  assert.ok(legalMoves(state, 'a').every(move => move.card === 8));
 });
 
-test('Guard eliminates on a correct non-Guard guess', () => {
-  const state = game(); setTurn(state, [1, 4], 8);
-  playCard(state, 'a', { card: 1, targetId: 'b', guess: 8 }, () => 0);
+test('Hunch can identify the zero-value Wiretap', () => {
+  const state = game(); setTurn(state, [1, 4], 0);
+  assert.ok(legalMoves(state, 'a').some(move => move.card === 1 && move.guess === 0));
+  playCard(state, 'a', { card: 1, targetId: 'b', guess: 0 }, () => 0);
   assert.equal(state.players[1].eliminated, true);
   assert.equal(state.phase, 'round-over');
+  assert.match(state.log[1], /Ada played Hunch on Bea/);
+  assert.deepEqual(state.lastAction, { actorId: 'a', card: 1, targetId: 'b' });
 });
 
-test('Prince discarding the Princess eliminates its holder', () => {
-  const state = game(); setTurn(state, [5, 4], 8);
+test('Interrogation exposing Scarlet Evidence eliminates its holder', () => {
+  const state = game(); setTurn(state, [5, 4], 9);
   playCard(state, 'a', { card: 5, targetId: 'b' }, () => 0);
   assert.equal(state.players[1].eliminated, true);
   assert.equal(state.players[0].tokens, 1);
 });
 
-test('Handmaid removes protected players from target choices', () => {
+test('Safehouse removes protected players from target choices', () => {
   const state = game(); setTurn(state, [1, 4], 2);
   state.players[1].protected = true;
   assert.deepEqual(legalMoves(state, 'a').filter(move => move.card === 1), [{ card: 1 }]);
+});
+
+test('Case Review pauses for a private choice and returns cards to the bottom', () => {
+  const state = game(); setTurn(state, [6, 9], 4);
+  state.deck = [2, 3];
+  playCard(state, 'a', { card: 6 }, () => 0);
+  assert.deepEqual(state.players[0].hand, [9, 3, 2]);
+  assert.deepEqual(state.pendingBottom, { playerId: 'a', count: 2 });
+  assert.equal(legalMoves(state, 'a').length, 0);
+  returnCardsToBottom(state, 'a', [2, 3], () => 0);
+  assert.deepEqual(state.players[0].hand, [9]);
+  assert.equal(state.pendingBottom, undefined);
+  assert.equal(state.turnIndex, 1);
+});
+
+test('a sole surviving Wiretap user gains bonus evidence as well as a round token', () => {
+  const state = game(); setTurn(state, [4, 9], 3);
+  state.players[0].discards = [0];
+  state.deck = [];
+  playCard(state, 'a', { card: 4 }, () => 0);
+  assert.equal(state.players[0].tokens, 2);
+  assert.match(state.log.at(-1)!, /Wiretap/);
+});
+
+test('six bots can complete a round including Case Review choices', () => {
+  const six = Array.from({ length: 6 }, (_, index) => ({ id: String(index), name: `Bot ${index}`, bot: true }));
+  const state = createGame(six, () => 0.42);
+  let actions = 0;
+  while (state.phase === 'playing' && actions++ < 100) {
+    const actor = state.players[state.turnIndex];
+    if (state.pendingBottom) returnCardsToBottom(state, actor.id, chooseBotReturns(state, actor.id), () => 0.42);
+    else playCard(state, actor.id, chooseBotMove(state, actor.id, () => 0.42), () => 0.42);
+  }
+  assert.notEqual(state.phase, 'playing');
+  assert.ok(actions < 100);
+});
+
+test('leaving on your turn forfeits and advances the game', () => {
+  const state = game(); setTurn(state, [2, 4], 3);
+  forfeitPlayer(state, 'a', () => 0);
+  assert.equal(state.players[0].eliminated, true);
+  assert.equal(state.phase, 'round-over');
+  assert.match(state.log.at(-2)!, /left the case/);
 });
