@@ -6,6 +6,7 @@ Original prompt: I want to build a mobile PWA game based on the board game love 
 - Generated and integrated the circular Scarlet Seal wax logo; added 512px, 192px, and Apple touch icons and aligned the UI/PWA palette to scarlet and warm beige.
 - Logo asset inspection passed and the production PWA build includes all icon sizes. Browser screenshot QA was attempted again but Chromium remains blocked by the host macOS sandbox before page load.
 - Added a Render Blueprint for a single Singapore Docker web service with WebSocket support, `/health`, CI-gated auto-deploys, and `scarletseal.decadenceinc.com`.
+- Verified `https://scarlet-seal.onrender.com/`: homepage and `/health` return 200, and a real WebSocket room completed a human-vs-bot round. Prepared arcade commit `55cbb02` with the live card; push is blocked only by missing local GitHub CLI credentials.
 - Architecture selected: Vite DOM client + authoritative Express/Socket.IO server + pure TypeScript rules engine.
 - Implemented lobby/session server, full card rules, bot turns, mobile UI, PWA manifest, and initial rules tests.
 - Rules tests pass (6/6). First typecheck found narrow event/return typing issues; corrected before browser QA.
