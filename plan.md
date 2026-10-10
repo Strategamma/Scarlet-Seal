@@ -1,7 +1,7 @@
 # Plan
 
-- Goal: make the lobby and active game immediately readable on phones without removing useful deduction information.
-- Scope: lobby density, active-turn hierarchy, hand sizing, last-action presentation, and progressive disclosure for public cards/history.
-- Approach: keep one primary decision surface, compress status into edge strips, move reference information into a native disclosure, and reduce oversized decorative panels.
-- Risks: hiding information needed for deduction, cramped two-card hands, inaccessible collapsed content, and short-screen overflow.
-- Verification: tests/build, room and solo network flows, narrow/short layout review, disclosure and card-selection interactions, text-state parity, and Playwright attempt.
+- Goal: audit every interactive surface and make its placement, accessibility, and responsive behavior coherent from 320px phones through desktop.
+- Scope: home, reconnect, lobby, game, action sheets, rules, leave confirmation, round/match summaries, reactions, disclosures, tooltips, and error states.
+- Approach: close control-state gaps first, add semantic dialog/button behavior, use a two-column desktop table without changing mobile order, and verify every server-backed action through targeted flows.
+- Risks: focus loss after DOM rerenders, inaccessible modal states, desktop grid collisions, short-screen overflow, and mobile-only title tooltips.
+- Verification: static control inventory, 320/375/520/900px layout reasoning, full tests/build, multi-client socket flows, keyboard/dialog audit, and required Playwright attempt.

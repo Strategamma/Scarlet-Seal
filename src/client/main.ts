@@ -20,6 +20,8 @@ let busy = false;
 let lastAnimatedAction = 0;
 let animateAction = false;
 let availableRooms: AvailableRoom[] = [];
+let restoringSeat = Boolean(session);
+let visibleReactionSequence = 0;
 let landingName = localStorage.getItem('scarlet-seal-name') ?? '';
 let landingCode = new URLSearchParams(location.search).get('room')?.toUpperCase() ?? '';
 const socket: Socket<ServerToClientEvents, ClientToServerEvents> = io({ auth: session ?? {} });
@@ -30,7 +32,14 @@ socket.on('room:state', value => {
   const sequence = value.game?.lastAction?.sequence ?? 0;
   animateAction = sequence > 0 && sequence !== lastAnimatedAction;
   if (sequence) lastAnimatedAction = sequence;
-  room = value; error = ''; selectedCard = undefined; selectedTarget = undefined; selectedBottom = []; render();
+  const newReaction = value.reaction?.sequence && value.reaction.sequence !== room?.reaction?.sequence;
+  room = value; restoringSeat = false; error = '';
+  if (!newReaction) { selectedCard = undefined; selectedTarget = undefined; selectedBottom = []; }
+  if (newReaction && value.reaction) {
+    visibleReactionSequence = value.reaction.sequence;
+    window.setTimeout(() => { if (visibleReactionSequence === value.reaction?.sequence) { visibleReactionSequence = 0; render(); } }, 2400);
+  }
+  render();
 });
 socket.on('connect_error', () => { error = 'Unable to reach the game server.'; render(); });
 const refreshRooms = () => socket.emit('rooms:list', result => {
@@ -39,7 +48,15 @@ const refreshRooms = () => socket.emit('rooms:list', result => {
   availableRooms = result.value;
   render();
 });
-socket.on('connect', refreshRooms);
+socket.on('connect', () => {
+  refreshRooms();
+  if (session) socket.emit('room:resume', result => {
+    if (result.ok) return;
+    restoringSeat = false; session = undefined;
+    localStorage.removeItem('scarlet-seal-session'); localStorage.removeItem('royal-post-session');
+    error = result.error; render();
+  });
+});
 window.setInterval(refreshRooms, 3000);
 
 const emit = <T>(send: (callback: (result: Result<T>) => void) => void) => {
@@ -58,12 +75,20 @@ const quickPlay = (name: string) => {
 };
 const esc = (value: string) => value.replace(/[&<>'"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[c]!);
 const art = (value: CardValue, className = 'card-art') => `<span class="${className} art-${value}" aria-hidden="true"></span>`;
-const card = (value: CardValue, index: number, interactive = false, forced = false, bottomChoice = false) => {
+const CARD_INTEL: Record<CardValue, { choice: string; reveal: string }> = {
+  0: { choice: 'No target', reveal: 'Your play is public' }, 1: { choice: 'Target + guess', reveal: 'Guess and result are public' },
+  2: { choice: 'Choose a rival', reveal: 'Their card stays private' }, 3: { choice: 'Choose a rival', reveal: 'Outcome is public' },
+  4: { choice: 'No target', reveal: 'Protection is public' }, 5: { choice: 'Choose anyone', reveal: 'Discard is revealed' },
+  6: { choice: 'No target', reveal: 'Your choice stays private' }, 7: { choice: 'Choose a rival', reveal: 'Swap is public' },
+  8: { choice: 'No target', reveal: 'No extra information' }, 9: { choice: 'No target', reveal: 'You will be eliminated' }
+};
+const intel = (value: CardValue) => `<div class="play-intel"><span>${CARD_INTEL[value].choice}</span><span>${CARD_INTEL[value].reveal}</span></div>`;
+const card = (value: CardValue, index: number, interactive = false, forced = false, bottomChoice = false, restriction = '') => {
   const data = CARDS[value];
   const selected = bottomChoice ? selectedBottom.includes(index) : selectedCard === value;
   const dataAttr = bottomChoice ? `data-bottom-index="${index}"` : `data-card="${value}"`;
-  return `<button type="button" aria-label="${data.name}, value ${value}. ${data.text}${interactive ? ' Select this card.' : ''}" class="card card-${value}${selected ? ' selected' : ''}${interactive ? ' playable' : ''}" ${interactive ? dataAttr : 'disabled'}>
-    ${art(value)}${forced ? '<span class="card-badge">Must play</span>' : ''}<span class="card-value">${value}</span><span class="card-copy"><span class="card-name">${data.name}</span><span class="card-text">${data.text}</span></span><span class="card-count" title="${data.count} in the deck" aria-label="${data.count} copies in deck">×${data.count}</span>
+  return `<button type="button" aria-label="${data.name}, value ${value}. ${data.text}${restriction ? ` ${restriction}.` : interactive ? ' Select this card.' : ''}" class="card card-${value}${selected ? ' selected' : ''}${interactive ? ' playable' : ''}" ${interactive ? dataAttr : 'disabled'}>
+    ${art(value)}${forced ? '<span class="card-badge">Must play</span>' : restriction ? `<span class="card-badge restricted">Locked</span>` : ''}<span class="card-value">${value}</span><span class="card-copy"><span class="card-name">${data.name}</span><span class="card-text">${data.text}</span><span class="card-meta">${restriction || `${CARD_INTEL[value].choice} · ${CARD_INTEL[value].reveal}`}</span></span><span class="card-count" title="${data.count} in the deck" aria-label="${data.count} copies in deck">×${data.count}</span>
   </button>`;
 };
 
@@ -87,6 +112,7 @@ const leaveSheet = () => leaveOpen ? `<div class="dialog-backdrop"><section clas
 const logo = (className: string) => `<img class="${className}" src="/icon-192.png" alt="" aria-hidden="true">`;
 
 function landing(): string {
+  if (restoringSeat) return `<main class="resume-seat"><div class="crest">${logo('crest-logo')}</div><p class="eyebrow">SAVED TABLE FOUND</p><h1>Return to<br><i>your seat</i></h1><p>Reconnecting you to room ${esc(session?.roomCode ?? '')}…</p>${error ? `<p class="error" role="alert">${esc(error)}</p><button type="button" id="retry-seat" class="secondary">Try reconnecting</button>` : '<span class="resume-pulse" aria-hidden="true"></span>'}</main>`;
   const roomRows = availableRooms.map(available => `<button type="button" class="room-row" data-join-room="${available.code}"><span class="room-identity"><b>${esc(available.hostName)}'s table</b><small>${available.code} · ${available.botCount ? `${available.botCount} bot${available.botCount === 1 ? '' : 's'}` : 'people only'}</small></span><span class="room-seats"><b>${available.playerCount}/${available.maxPlayers}</b><small>seats</small></span><span class="room-join">Sit down <i>›</i></span></button>`).join('');
   return `<main class="landing">
     <div class="landing-tools">${rulesButton()}</div>
@@ -108,10 +134,10 @@ function lobby(): string {
   const botCount = room!.players.filter(player => player.bot).length;
   const humanCount = room!.players.length - botCount;
   return `<main class="lobby"><header>${leaveButton()}<span class="brand">${logo('mini-crest')}<span>Scarlet Seal</span></span>${rulesButton('Rules')}</header>
-    <section class="room-code"><div><p class="eyebrow">PRIVATE TABLE</p><h2>${room!.code}</h2></div><button id="share" class="text-button">Share invite</button><input class="sr-only" value="${share}" aria-hidden="true"></section>
-    <section class="players"><div class="seat-heading"><div><p class="eyebrow">PLAYERS &amp; BOTS</p><h3>At the table</h3></div><span>${room!.players.length} / ${MAX_PLAYERS} seats</span></div>${room!.players.map(p => `<div class="player-row"><span class="avatar">${p.bot ? '⚙' : esc(p.name[0].toUpperCase())}</span><strong>${esc(p.name)}</strong>${p.host ? '<small>HOST</small>' : ''}${p.bot ? '<small>BOT</small>' : ''}${isHost && p.bot ? `<button type="button" class="remove-bot" data-remove-bot="${p.id}" aria-label="Remove ${esc(p.name)}">×</button>` : `<i class="status ${p.connected ? '' : 'offline'}" aria-label="${p.connected ? 'Connected' : 'Offline'}"></i>`}</div>`).join('')}</section>
+    <section class="room-code"><div><p class="eyebrow">PRIVATE TABLE</p><h2>${room!.code}</h2></div><button type="button" id="share" class="text-button">Share invite</button><input class="sr-only" value="${share}" aria-hidden="true"></section>
+    <section class="players"><div class="seat-heading"><div><p class="eyebrow">PLAYERS &amp; BOTS</p><h3>At the table</h3></div><span>${room!.players.length} / ${MAX_PLAYERS} seats</span></div>${room!.players.map(p => `<div class="player-row"><span class="avatar">${p.bot ? '⚙' : esc(p.name[0].toUpperCase())}</span><strong>${esc(p.name)}</strong>${p.host ? '<small>HOST</small>' : ''}${p.bot ? '<small>BOT</small>' : ''}${isHost && p.bot ? `<button type="button" class="remove-bot" data-remove-bot="${p.id}" aria-label="Remove ${esc(p.name)}">×</button>` : `<span class="status ${p.connected ? '' : 'offline'}" role="img" title="${p.connected ? 'Connected' : 'Offline'}" aria-label="${p.connected ? 'Connected' : 'Offline'}"></span>`}</div>`).join('')}</section>
     ${isHost ? `<section class="seat-controls"><div><strong>Fill an empty seat</strong><small>${humanCount} ${humanCount === 1 ? 'person' : 'people'} · ${botCount} ${botCount === 1 ? 'bot' : 'bots'}</small></div><button type="button" id="add-bot" class="add-bot" ${room!.players.length >= MAX_PLAYERS || busy ? 'disabled' : ''}><span>＋</span>Add bot</button></section>` : ''}
-    <div class="lobby-actions">${room!.canStart ? `<button id="start" class="primary" ${busy ? 'disabled' : ''}>Start ${room!.players.length}-player game</button>` : `<p>${isHost ? 'Invite someone or add a bot to fill the second seat.' : 'Waiting for the host to begin…'}</p>`}<small>Games support any mix of people and bots, up to six seats.</small></div>
+    <div class="lobby-actions">${room!.canStart ? `<button type="button" id="start" class="primary" ${busy ? 'disabled' : ''}>Start ${room!.players.length}-player game</button>` : `<p>${isHost ? 'Invite someone or add a bot to fill the second seat.' : 'Waiting for the host to begin…'}</p>`}<small>Games support any mix of people and bots, up to six seats.</small></div>
     ${error ? `<p class="error">${esc(error)}</p>` : ''}</main>${rulesSheet()}${leaveSheet()}`;
 }
 
@@ -138,31 +164,47 @@ function game(): string {
   else if (myTurn && selectedCard) instruction = `Confirm your ${CARDS[selectedCard].name}`;
 
   let action = '';
-  if (choosingBottom) action = `<div class="action-sheet confirm"><div class="action-step">CASE REVIEW</div><p>Return ${game.bottomChoiceCount} card${game.bottomChoiceCount === 1 ? '' : 's'} to the bottom</p><small class="action-effect">Tap cards to choose. The unselected card stays in your hand.</small><button id="confirm-bottom" class="primary" ${selectedBottom.length === game.bottomChoiceCount ? '' : 'disabled'}>Return selected cards</button></div>`;
-  else if (selectedCard && !direct && targets.length && !selectedTarget) action = `<div class="action-sheet"><div class="action-step">STEP 2 OF ${selectedCard === 1 ? '3' : '2'}</div><h3>Choose a player</h3><p class="action-help">${CARDS[selectedCard].text}</p>${targets.map(id => { const p = game.players.find(x => x.id === id)!; return `<button data-target="${id}"><span class="target-avatar">${p.bot ? '⚙' : esc(p.name[0])}</span><span><b>${esc(p.name)}</b><small>${p.protected ? 'Protected' : 'Available'}</small></span><span>›</span></button>`; }).join('')}<button class="cancel">Choose a different card</button></div>`;
-  else if (selectedCard && selectedTarget && guesses.length) action = `<div class="action-sheet"><div class="action-step">STEP 3 OF 3</div><h3>What card do they hold?</h3><p class="action-help">A correct guess eliminates ${esc(game.players.find(p => p.id === selectedTarget)?.name ?? 'them')}.</p><div class="guess-grid">${guesses.map(v => `<button data-guess="${v}"><b>${v}</b>${CARDS[v].name}</button>`).join('')}</div><button class="cancel">Choose a different card</button></div>`;
-  else if (selectedCard && (direct || selectedTarget)) action = `<div class="action-sheet confirm"><div class="action-step">FINAL STEP</div><p>Play <b>${CARDS[selectedCard].name}</b>${selectedTarget ? ` on <b>${esc(game.players.find(p => p.id === selectedTarget)!.name)}</b>` : ''}?</p><small class="action-effect">${CARDS[selectedCard].text}</small><button id="confirm" class="primary">Confirm play</button><button class="cancel">Choose a different card</button></div>`;
+  if (choosingBottom) action = `<div class="action-sheet confirm" role="dialog" aria-modal="true" aria-label="Return cards"><div class="action-step">CASE REVIEW</div><p>Return ${game.bottomChoiceCount} card${game.bottomChoiceCount === 1 ? '' : 's'} to the bottom</p><small class="action-effect">Tap cards to choose. The unselected card stays in your hand.</small><button type="button" id="confirm-bottom" class="primary" ${selectedBottom.length === game.bottomChoiceCount ? '' : 'disabled'}>Return selected cards</button></div>`;
+  else if (selectedCard && !direct && targets.length && !selectedTarget) action = `<div class="action-sheet" role="dialog" aria-modal="true" aria-label="Choose a player"><div class="action-step">STEP 2 OF ${selectedCard === 1 ? '3' : '2'}</div><h3>Choose a player</h3><p class="action-help">${CARDS[selectedCard].text}</p>${intel(selectedCard)}${targets.map(id => { const p = game.players.find(x => x.id === id)!; return `<button type="button" data-target="${id}"><span class="target-avatar">${p.bot ? '⚙' : esc(p.name[0])}</span><span><b>${esc(p.name)}</b><small>${p.protected ? 'Protected' : 'Available'}</small></span><span>›</span></button>`; }).join('')}<button type="button" class="cancel">Choose a different card</button></div>`;
+  else if (selectedCard && selectedTarget && guesses.length) action = `<div class="action-sheet" role="dialog" aria-modal="true" aria-label="Choose a card guess"><div class="action-step">STEP 3 OF 3</div><h3>What card do they hold?</h3><p class="action-help">A correct guess eliminates ${esc(game.players.find(p => p.id === selectedTarget)?.name ?? 'them')}.</p><div class="guess-grid">${guesses.map(v => `<button type="button" data-guess="${v}"><b>${v}</b>${CARDS[v].name}</button>`).join('')}</div><button type="button" class="cancel">Choose a different card</button></div>`;
+  else if (selectedCard && (direct || selectedTarget)) action = `<div class="action-sheet confirm" role="dialog" aria-modal="true" aria-label="Confirm card play"><div class="action-step">FINAL STEP</div><p>Play <b>${CARDS[selectedCard].name}</b>${selectedTarget ? ` on <b>${esc(game.players.find(p => p.id === selectedTarget)!.name)}</b>` : ''}?</p><small class="action-effect">${CARDS[selectedCard].text}</small>${intel(selectedCard)}<button type="button" id="confirm" class="primary">Confirm play</button><button type="button" class="cancel">Choose a different card</button></div>`;
 
   const winningIds = game.phase === 'match-over' ? game.matchWinnerIds : game.winnerIds;
   const winnerNames = winningIds.map(id => game.players.find(p => p.id === id)?.name).filter(Boolean).join(' & ');
   const lastActor = game.players.find(p => p.id === game.lastAction?.actorId);
   const lastTarget = game.players.find(p => p.id === game.lastAction?.targetId);
-  const actionStage = game.lastAction && lastActor ? `<section class="action-stage action-${game.lastAction.card} ${animateAction ? 'animate' : ''}" aria-live="polite"><span class="last-play-art art-${game.lastAction.card}" aria-hidden="true"><b>${game.lastAction.card}</b></span><div class="last-play-copy"><small>LAST PLAY</small><p><b>${lastActor.id === me.id ? 'You' : esc(lastActor.name)}</b> played <strong>${CARDS[game.lastAction.card].name}</strong>${lastTarget ? ` on <b>${lastTarget.id === me.id ? 'you' : esc(lastTarget.name)}</b>` : ''}</p><span>${esc(game.lastAction.resolution)}</span></div></section>` : `<section class="action-stage waiting"><p>No cards played yet</p></section>`;
+  const botAside = lastActor?.bot ? `<em>“${['Nothing personal.', 'I had a hunch.', 'Follow the evidence.', 'That story does not add up.', 'You cannot reach me here.', 'Let us try another angle.', 'Every detail matters.', 'New face, same case.', 'A useful distraction.', 'Case closed.'][game.lastAction!.card]}”</em>` : '';
+  const actionStage = game.lastAction && lastActor ? `<section class="action-stage action-${game.lastAction.card} ${animateAction ? 'animate' : ''}" aria-live="polite"><span class="last-play-art art-${game.lastAction.card}" aria-hidden="true"><b>${game.lastAction.card}</b></span><div class="last-play-copy"><small>LAST PLAY</small><p><b>${lastActor.id === me.id ? 'You' : esc(lastActor.name)}</b> played <strong>${CARDS[game.lastAction.card].name}</strong>${lastTarget ? ` on <b>${lastTarget.id === me.id ? 'you' : esc(lastTarget.name)}</b>` : ''}</p><span>${esc(game.lastAction.resolution)}</span>${botAside}</div></section>` : `<section class="action-stage waiting"><p>No cards played yet</p></section>`;
   const publicDiscards = `<section class="discard-board" aria-label="All public cards"><div class="discard-heading"><p class="eyebrow">PUBLIC CARDS</p><small>Use these to narrow the deck</small></div><div class="discard-lanes">${game.faceUpRemoved.length ? `<article class="discard-lane removed"><b>Set aside</b><div>${game.faceUpRemoved.map(value => `<span class="discard-chip art-${value}" title="${CARDS[value].name}, value ${value}"><i>${value}</i><small>${CARDS[value].name}</small></span>`).join('')}</div></article>` : ''}${game.players.map(player => `<article class="discard-lane ${game.lastAction?.targetId === player.id ? 'targeted' : ''}"><b>${player.id === me.id ? 'You' : esc(player.name)}</b><div>${player.discards.length ? player.discards.map((value, index) => `<span class="discard-chip art-${value} ${game.lastAction?.actorId === player.id && index === player.discards.length - 1 ? 'latest' : ''}" title="${CARDS[value].name}, value ${value}"><i>${value}</i><small>${CARDS[value].name}</small></span>`).join('') : '<em>None yet</em>'}</div></article>`).join('')}</div></section>`;
-  const roundOverlay = game.phase !== 'playing' ? `<div class="overlay"><div class="result"><div class="crest">${logo('crest-logo')}</div><p class="eyebrow">${game.phase === 'match-over' ? 'CASE CLOSED' : `ROUND ${game.round} COMPLETE`}</p><h2>${esc(winnerNames || 'A rival')} ${winningIds.length > 1 ? 'win' : 'wins'}!</h2>${game.phase === 'round-over' && room!.players.find(p => p.id === me.id)?.host ? '<button id="next-round" class="primary">Deal next round</button>' : game.phase === 'round-over' ? '<p>Waiting for the host…</p>' : '<p>The case has found its sharpest detective.</p>'}</div></div>` : '';
+  const decisivePlays = game.log.filter(line => !line.startsWith('Round ')).slice(-4);
+  const roundOverlay = game.phase !== 'playing' ? `<div class="overlay"><div class="result case-summary" role="dialog" aria-modal="true" aria-labelledby="result-title"><div class="seal-stamp" aria-hidden="true"><span>${game.phase === 'match-over' ? 'CASE' : 'ROUND'}</span><b>CLOSED</b></div><p class="eyebrow">${game.phase === 'match-over' ? 'CASE CLOSED' : `ROUND ${game.round} COMPLETE`}</p><h2 id="result-title">${esc(winnerNames || 'A rival')} ${winningIds.length > 1 ? 'win' : 'wins'}!</h2><section><h3>Decisive plays</h3><ol>${decisivePlays.map(line => `<li>${esc(line)}</li>`).join('')}</ol></section>${game.phase === 'round-over' && room!.players.find(p => p.id === me.id)?.host ? '<button type="button" id="next-round" class="primary">Deal next round</button>' : game.phase === 'round-over' ? '<p>Waiting for the host…</p>' : '<p>The case has found its sharpest detective.</p><button type="button" id="finish-home" class="secondary">Return home</button>'}</div></div>` : '';
+  const reaction = room!.reaction && visibleReactionSequence === room!.reaction.sequence ? room!.reaction : undefined;
+  const reactionPlayer = reaction ? room!.players.find(player => player.id === reaction.playerId) : undefined;
   return `<main class="table"><header><span>Round ${game.round}</span><nav aria-label="Game navigation">${leaveButton()}${rulesButton('Rules')}</nav><span class="deck-count">Deck <b>${game.deckCount}</b></span></header>
     <section class="opponents">${game.players.filter(p => p.id !== me.id).map(p => { const targeted = game.lastAction?.targetId === p.id; const hasTurn = game.turnPlayerId === p.id && game.phase === 'playing'; return `<div class="opponent ${p.eliminated ? 'out' : 'alive'} ${targeted ? 'targeted' : ''} ${hasTurn ? 'current-turn' : ''}"><div class="avatar">${p.bot ? '⚙' : esc(p.name[0])}</div><b>${esc(p.name)}</b><span>${'◆'.repeat(p.tokens)}${p.protected ? ' · Shielded' : ''}</span><small class="life-state">${p.eliminated ? 'OUT' : hasTurn ? 'TAKING TURN' : 'ALIVE'}</small><small>${p.eliminated ? 'No hand' : `${p.handCount} card`}</small></div>`; }).join('')}</section>
     <section class="score-strip"><span>You</span><strong>${me.tokens} / ${tokenTarget(game.players.length)} seals</strong><span>to win</span></section>
-    <section class="turn-banner ${myTurn ? 'active' : ''}"><span class="turn-dot" aria-hidden="true"></span><div><small>${game.phase === 'playing' ? (myTurn ? 'YOUR TURN' : `${esc(turn?.name ?? 'Opponent')}'S TURN`) : 'ROUND COMPLETE'}</small><p>${game.phase === 'playing' ? instruction : 'The round has ended'}</p></div>${game.notice ? `<strong>${esc(game.notice)}</strong>` : ''}</section>
-    <section class="hand"><div class="hand-heading"><p class="eyebrow">YOUR HAND</p><span>${choosingBottom ? `${selectedBottom.length} of ${game.bottomChoiceCount} selected` : myTurn ? 'Tap a glowing card' : 'Hidden from rivals'}</span></div><div class="cards ${choosingBottom ? 'review-cards' : ''}">${game.hand.map((v, index) => card(v, index, choosingBottom || (myTurn && playable.has(v)), forcedCard === v, choosingBottom)).join('')}</div></section>
-    ${actionStage}<details class="case-notes"><summary><span><b>Case notes</b><small>Public cards &amp; recent plays</small></span><i aria-hidden="true">⌄</i></summary>${publicDiscards}<section class="history" aria-label="Action history"><ol>${game.log.slice(-3).map(line => `<li>${esc(line)}</li>`).join('')}</ol></section></details>
-    ${error ? `<p class="error">${esc(error)}</p>` : ''}${action}${roundOverlay}</main>${rulesSheet()}${leaveSheet()}`;
+    <div class="play-column"><section class="turn-banner ${myTurn ? 'active' : ''}"><span class="turn-dot" aria-hidden="true"></span><div><small>${game.phase === 'playing' ? (myTurn ? 'YOUR TURN' : `${esc(turn?.name ?? 'Opponent')}'S TURN`) : 'ROUND COMPLETE'}</small><p>${game.phase === 'playing' ? instruction : 'The round has ended'}</p></div>${game.notice ? `<strong>${esc(game.notice)}</strong>` : ''}</section>
+    <section class="hand"><div class="hand-heading"><p class="eyebrow">YOUR HAND</p><span>${choosingBottom ? `${selectedBottom.length} of ${game.bottomChoiceCount} selected` : myTurn ? 'Tap a glowing card' : 'Hidden from rivals'}</span></div><div class="cards ${choosingBottom ? 'review-cards' : ''}">${game.hand.map((v, index) => card(v, index, choosingBottom || (myTurn && playable.has(v)), forcedCard === v, choosingBottom, myTurn && !choosingBottom && !playable.has(v) ? (forcedCard !== undefined ? 'Red Herring must be played' : 'Unavailable now') : '')).join('')}</div></section></div>
+    <aside class="table-sidebar">${actionStage}<nav class="reactions" aria-label="Table reactions"><button type="button" data-reaction="Suspicious">Suspicious</button><button type="button" data-reaction="Nice try">Nice try</button><button type="button" data-reaction="Case closed">Case closed</button></nav><details class="case-notes"><summary><span><b>Case notes</b><small>Public cards &amp; recent plays</small></span><i aria-hidden="true">⌄</i></summary>${publicDiscards}<section class="history" aria-label="Action history"><ol>${game.log.slice(-3).map(line => `<li>${esc(line)}</li>`).join('')}</ol></section></details></aside>
+    ${reaction && reactionPlayer ? `<div class="reaction-pop" role="status"><b>${reactionPlayer.id === me.id ? 'You' : esc(reactionPlayer.name)}</b><span>${reaction.text}</span></div>` : ''}${error ? `<p class="error">${esc(error)}</p>` : ''}${action}${roundOverlay}</main>${rulesSheet()}${leaveSheet()}`;
 }
 
 function render(): void {
   root.innerHTML = !room ? landing() : room.game ? game() : lobby();
   animateAction = false;
   bind();
+  requestAnimationFrame(() => {
+    const modal = document.querySelector<HTMLElement>('.action-sheet, .case-summary, .confirm-dialog');
+    if (!modal) return;
+    const controls = [...modal.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])')];
+    if (!modal.contains(document.activeElement)) controls[0]?.focus();
+    modal.addEventListener('keydown', event => {
+      if (event.key !== 'Tab' || controls.length < 2) return;
+      const first = controls[0], last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    });
+  });
 }
 
 function bind(): void {
@@ -170,6 +212,7 @@ function bind(): void {
   document.querySelector('#close-rules')?.addEventListener('click', () => { rulesOpen = false; render(); });
   document.querySelector('.rules-backdrop')?.addEventListener('click', e => { if (e.target === e.currentTarget) { rulesOpen = false; render(); } });
   const lanForm = document.querySelector<HTMLFormElement>('#lan-form');
+  document.querySelector('#retry-seat')?.addEventListener('click', () => { error = ''; restoringSeat = true; render(); socket.connect(); });
   lanForm?.querySelector<HTMLInputElement>('input[name=name]')?.addEventListener('input', event => { landingName = (event.currentTarget as HTMLInputElement).value; });
   lanForm?.querySelector<HTMLInputElement>('input[name=code]')?.addEventListener('input', event => { landingCode = (event.currentTarget as HTMLInputElement).value.toUpperCase(); });
   const joinRoom = (code: string) => { if (!lanForm?.reportValidity()) return; const data = new FormData(lanForm); localStorage.setItem('scarlet-seal-name', String(data.get('name'))); emit(cb => socket.emit('room:join', { code, name: String(data.get('name')) }, cb)); };
@@ -181,11 +224,25 @@ function bind(): void {
   document.querySelectorAll<HTMLElement>('[data-remove-bot]').forEach(el => el.addEventListener('click', () => emit(cb => socket.emit('room:remove-bot', el.dataset.removeBot!, cb))));
   document.querySelector('#start')?.addEventListener('click', () => emit(cb => socket.emit('game:start', cb)));
   document.querySelector('#next-round')?.addEventListener('click', () => emit(cb => socket.emit('game:next-round', cb)));
-  document.querySelector('#share')?.addEventListener('click', async () => { const data = { title: 'Join my Scarlet Seal room', text: `Join room ${room!.code}`, url: `${location.origin}?room=${room!.code}` }; if (navigator.share) await navigator.share(data); else { await navigator.clipboard.writeText(`${data.text}: ${data.url}`); const button = document.querySelector('#share')!; button.textContent = 'Invitation copied!'; } });
+  document.querySelector('#finish-home')?.addEventListener('click', returnHome);
+  document.querySelectorAll<HTMLElement>('[data-reaction]').forEach(el => el.addEventListener('click', () => emit(cb => socket.emit('room:react', el.dataset.reaction as 'Suspicious' | 'Nice try' | 'Case closed', cb))));
+  document.querySelector('#share')?.addEventListener('click', async () => {
+    const data = { title: 'Join my Scarlet Seal room', text: `Join room ${room!.code}`, url: `${location.origin}?room=${room!.code}` };
+    try {
+      if (navigator.share) await navigator.share(data);
+      else { await navigator.clipboard.writeText(`${data.text}: ${data.url}`); const button = document.querySelector('#share')!; button.textContent = 'Invitation copied!'; }
+    } catch (reason) { if (reason instanceof DOMException && reason.name === 'AbortError') return; error = 'Could not share this invitation. Copy the room code instead.'; render(); }
+  });
   document.querySelectorAll('[data-leave-room]').forEach(el => el.addEventListener('click', () => { leaveOpen = true; render(); requestAnimationFrame(() => document.querySelector<HTMLElement>('#stay-room')?.focus()); }));
   document.querySelector('#stay-room')?.addEventListener('click', () => { leaveOpen = false; render(); });
-  document.querySelector('#confirm-leave')?.addEventListener('click', () => emit(cb => socket.emit('room:leave', result => { cb(result); if (result.ok) { localStorage.removeItem('scarlet-seal-session'); localStorage.removeItem('royal-post-session'); location.href = location.origin; } })));
-  document.querySelectorAll<HTMLElement>('[data-card]').forEach(el => el.addEventListener('click', () => { selectedCard = Number(el.dataset.card) as CardValue; selectedTarget = undefined; render(); }));
+  document.querySelector('#confirm-leave')?.addEventListener('click', returnHome);
+  document.querySelectorAll<HTMLElement>('[data-card]').forEach(el => el.addEventListener('click', () => {
+    const value = Number(el.dataset.card) as CardValue;
+    const moves = room!.game!.legalMoves.filter(move => move.card === value);
+    const direct = moves.find(move => !move.targetId && move.guess === undefined);
+    if (direct && moves.length === 1 && [0, 4, 6, 8].includes(value)) { play(direct); return; }
+    selectedCard = value; selectedTarget = undefined; render();
+  }));
   document.querySelectorAll<HTMLElement>('[data-bottom-index]').forEach(el => el.addEventListener('click', () => {
     const index = Number(el.dataset.bottomIndex);
     selectedBottom = selectedBottom.includes(index) ? selectedBottom.filter(value => value !== index) : selectedBottom.length < room!.game!.bottomChoiceCount ? [...selectedBottom, index] : selectedBottom;
@@ -198,6 +255,7 @@ function bind(): void {
   document.querySelectorAll('.cancel').forEach(el => el.addEventListener('click', () => { selectedCard = undefined; selectedTarget = undefined; render(); }));
 }
 function play(move: Move): void { emit(cb => socket.emit('game:play', move, cb)); }
+function returnHome(): void { emit(cb => socket.emit('room:leave', result => { cb(result); if (result.ok) { localStorage.removeItem('scarlet-seal-session'); localStorage.removeItem('royal-post-session'); location.href = location.origin; } })); }
 
 window.render_game_to_text = () => {
   const game = room?.game;

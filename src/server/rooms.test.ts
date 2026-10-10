@@ -7,7 +7,7 @@ function setup() {
   const service = new RoomService((_socketId, _event, state) => states.push(state));
   const socket = { id: `socket-${Math.random()}`, join: () => undefined } as unknown as Parameters<RoomService['create']>[0];
   const session = service.create(socket, 'Host');
-  return { service, session, states };
+  return { service, session, states, socket };
 }
 
 test('a host can fill all six seats with bots', () => {
@@ -49,4 +49,20 @@ test('leaving a lobby removes the member cleanly', () => {
   service.addBot(session);
   service.leave(session);
   assert.throws(() => service.state(session), /session is no longer valid/i);
+});
+
+test('disconnecting host transfers control to a connected human', () => {
+  const { service, session, socket } = setup();
+  const guestSocket = { id: `guest-${Math.random()}`, join: () => undefined } as unknown as Parameters<RoomService['join']>[0];
+  const guest = service.join(guestSocket, session.roomCode, 'Guest');
+  service.disconnect(socket.id);
+  assert.equal(service.state(guest).players.find(player => player.id === guest.playerId)?.host, true);
+  assert.equal(service.state(guest).canStart, true);
+});
+
+test('reactions are bounded and visible to the room', () => {
+  const { service, session } = setup();
+  service.react(session, 'Suspicious');
+  assert.deepEqual(service.state(session).reaction, { sequence: 1, playerId: session.playerId, text: 'Suspicious' });
+  assert.throws(() => service.react(session, 'Nope' as 'Suspicious'), /not available/i);
 });

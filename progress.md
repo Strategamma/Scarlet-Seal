@@ -36,6 +36,13 @@ Original prompt: I want to build a mobile PWA game based on the board game love 
 - Rebuilt the lobby and active-table hierarchy from user screenshots: compact room identity and seats, removed the redundant turn tutorial, moved the turn prompt and hand ahead of secondary information, reduced normal hand height, converted the last action into a compact receipt, and placed public cards/history in an accessible “Case notes” disclosure.
 - Preserved three-card Case Review sizing and all ten per-card last-play animations, including reduced-motion behavior. Added `UIUXVisions.md` with the durable one-primary-action and progressive-disclosure direction.
 - Verification: 24/24 tests and production build pass. The required Playwright runner was attempted after the UI change but macOS again blocked Chromium at process launch, so no new automated screenshots were available in this environment.
+- Added faster low-risk turns: Wiretap, Safehouse, Case Review, and Red Herring resolve on tap when they have exactly one legal move; destructive Scarlet Evidence and every targeted action still require confirmation.
+- Cards now state target requirements and what becomes public, forced cards explain why alternatives are locked, and every last-play receipt explicitly preserves actor, card, target, and outcome. Detective bots add short card-specific remarks between turns.
+- Added bounded table reactions (Suspicious, Nice try, Case closed), a saved-seat reconnect surface, automatic host transfer to a connected human, and a round/match overlay with an animated seal stamp plus decisive public log entries.
+- Verification: 26/26 tests and production build pass. A two-client Socket.IO smoke test verified reaction delivery, host transfer, and authenticated seat resume end to end.
+- Completed a full control/layout audit across home, reconnect, lobby, game, rules, card choice sheets, Case notes, leave confirmation, reactions, and round/match overlays. Added explicit button types, modal semantics and focus containment, retry/share error states, and a match-over Return home action.
+- Added 44px mobile touch targets, readable microcopy floors, focus styling for disclosures, compact short-landscape rules, and a real two-column desktop table while preserving the mobile-first order. Connection dots now expose both visible hover titles and accessible labels; card restrictions are included in accessible names.
+- Verification: all 26 tests, production build, diff validation, and a static handler inventory pass. A real Socket.IO sweep exercised create/list, add/remove bot, react, start, play, round completion, next round, and leave. Required Playwright screenshot capture remains blocked at Chromium launch by the host macOS Mach-port policy.
 
 ## TODO
 

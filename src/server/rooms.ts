@@ -1,11 +1,11 @@
 import { randomBytes } from 'node:crypto';
 import type { Socket } from 'socket.io';
 import { chooseBotMove, chooseBotReturns, createGame, forfeitPlayer, MAX_PLAYERS, playCard, returnCardsToBottom, startRound, viewFor, type CardValue, type GameState, type Move } from '../shared/game.js';
-import type { AvailableRoom, ClientToServerEvents, RoomView, ServerToClientEvents, Session } from '../shared/protocol.js';
+import type { AvailableRoom, ClientToServerEvents, Reaction, RoomView, ServerToClientEvents, Session } from '../shared/protocol.js';
 
 type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
 interface Member { id: string; token: string; name: string; bot: boolean; connected: boolean; socketId?: string }
-interface Room { code: string; hostId: string; members: Member[]; game?: GameState; botTimer?: NodeJS.Timeout }
+interface Room { code: string; hostId: string; members: Member[]; game?: GameState; botTimer?: NodeJS.Timeout; reaction?: Reaction; reactionSequence: number }
 
 const rooms = new Map<string, Room>();
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -30,7 +30,7 @@ export class RoomService {
 
   create(socket: GameSocket, rawName: string): Session {
     const member: Member = { id: id(), token: token(), name: safeName(rawName), bot: false, connected: true, socketId: socket.id };
-    const room: Room = { code: roomCode(), hostId: member.id, members: [member] };
+    const room: Room = { code: roomCode(), hostId: member.id, members: [member], reactionSequence: 0 };
     rooms.set(room.code, room); socket.join(room.code); this.push(room);
     return { roomCode: room.code, playerId: member.id, token: member.token };
   }
@@ -124,6 +124,13 @@ export class RoomService {
     startRound(room.game); this.push(room); this.scheduleBot(room);
   }
 
+  react(session: Session, text: Reaction['text']): void {
+    const { room, member } = this.authenticate(session);
+    if (!['Suspicious', 'Nice try', 'Case closed'].includes(text)) throw new Error('That reaction is not available.');
+    room.reaction = { sequence: ++room.reactionSequence, playerId: member.id, text };
+    this.push(room);
+  }
+
   disconnect(socketId: string): void {
     for (const room of rooms.values()) {
       const member = room.members.find(m => m.socketId === socketId);
@@ -131,6 +138,9 @@ export class RoomService {
       member.connected = false; member.socketId = undefined;
       const player = room.game?.players.find(p => p.id === member.id);
       if (player) player.connected = false;
+      if (room.hostId === member.id) {
+        room.hostId = room.members.find(candidate => !candidate.bot && candidate.id !== member.id && candidate.connected)?.id ?? room.hostId;
+      }
       this.push(room); break;
     }
   }
@@ -169,7 +179,8 @@ export class RoomService {
       code: room.code,
       players: room.members.map(m => ({ id: m.id, name: m.name, bot: m.bot, connected: m.connected, host: m.id === room.hostId })),
       game: room.game ? viewFor(room.game, playerId) : undefined,
-      canStart: room.hostId === playerId && !room.game && room.members.length >= 2
+      canStart: room.hostId === playerId && !room.game && room.members.length >= 2,
+      reaction: room.reaction
     };
   }
   private push(room: Room): void {
