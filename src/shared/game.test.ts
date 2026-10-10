@@ -36,6 +36,8 @@ test('player views never reveal an opponent hand', () => {
   assert.equal(view.players.find(p => p.id === 'b')?.handCount, 1);
   assert.equal('hand' in (view.players.find(p => p.id === 'b') as object), false);
   assert.deepEqual(view.players.find(p => p.id === 'b')?.discards, [0, 2, 4]);
+  assert.equal(view.removedCount, 3);
+  assert.equal('faceUpRemoved' in view, false);
 });
 
 test('Wiretap has no immediate effect and finishes the turn normally', () => {
@@ -52,6 +54,8 @@ test('Lead reveals privately before an empty deck ends the round', () => {
   playCard(state, 'a', { card: 2, targetId: 'b' }, () => 0);
   assert.equal(state.privateNotice.a, 'Bea holds Scarlet Evidence.');
   assert.equal(state.phase, 'round-over');
+  assert.match(state.roundSummary?.reason ?? '', /deck ran out.*Ada held Safehouse \(4\).*Bea held Scarlet Evidence \(9\)/);
+  assert.deepEqual(state.roundSummary?.reveals, [{ playerId: 'a', card: 4 }, { playerId: 'b', card: 9 }]);
 });
 
 test('Red Herring is forced with Interrogation or Disguise', () => {
@@ -67,6 +71,8 @@ test('Hunch can identify the zero-value Wiretap', () => {
   assert.equal(state.phase, 'round-over');
   assert.match(state.log[1], /Ada played Hunch on Bea/);
   assert.deepEqual(state.lastAction, { sequence: 1, actorId: 'a', card: 1, targetId: 'b', resolution: 'Correct: Bea was eliminated.' });
+  assert.equal(state.roundSummary?.reason, 'Ada was the last investigator still in the case.');
+  assert.deepEqual(state.roundSummary?.reveals, [{ playerId: 'a', card: 4 }]);
 });
 
 test('Alibi compares remaining hands immediately and reports the eliminated player', () => {

@@ -18,7 +18,7 @@ Rooms use short join codes and work identically over the deployed internet origi
 
 ## Rules and conventions
 
-The 21-card deck uses values 0–9 and original detective names. Wiretap grants a bonus seal to its sole surviving user; Case Review privately draws up to two cards and returns the same number to the deck. Every table requires exactly three seals to win. All played, effect-discarded, elimination-discarded, and two-player face-up removed cards are public; hands, the facedown set-aside card, and Case Review returns stay private. Game logic must remain deterministic under an injected RNG.
+The 21-card deck uses values 0–9 and original detective names. Wiretap grants a bonus seal to its sole surviving user; Case Review privately draws up to two cards and returns the same number to the deck. Every table requires exactly three seals to win. Played, effect-discarded, and elimination-discarded cards are public; hands, all set-aside cards (including the three removed in two-player rounds), and Case Review returns stay private. Game logic must remain deterministic under an injected RNG.
 
 Use Node 20+. Commands: `npm run dev`, `npm test`, `npm run build`, `npm start`. Production expects a reverse proxy with WebSocket upgrades and HTTPS. Set `PORT` as needed.
 
@@ -26,4 +26,4 @@ Production: `https://scarlet-seal.onrender.com/`, one Render Docker web service 
 
 ## Current state
 
-Live playable vertical slice: one-tap solo, discoverable LAN tables, code-based rooms, configurable bots, authenticated seat resume, automatic host transfer, complete card actions, reactions, round/match scoring, mobile PWA shell, and production server. The home screen asks for a name only for multiplayer. Server-supplied legal moves drive prompts and explain target/public-information consequences; safe single-choice cards resolve immediately. A compact actor → card → target receipt states every outcome. Public discards and recent plays live in progressive Case notes. Round summaries stamp the case closed and retain decisive public events. Motion respects reduced-motion. Rules and exit confirmation are keyboard-navigable modal surfaces.
+Live playable vertical slice: one-tap solo, discoverable LAN tables, code-based rooms, configurable bots, authenticated seat resume, automatic host transfer, complete card actions, reactions, round/match scoring, mobile PWA shell, and production server. The home screen asks for a name only for multiplayer. Server-supplied legal moves drive prompts and explain target/public-information consequences; safe single-choice cards resolve immediately. A compact actor → card → target receipt states every outcome. Public discards and recent plays live in progressive Case notes. Round summaries explain the ending, reveal surviving hands, stamp the case closed, and retain decisive public events. Motion respects reduced-motion. Rules and exit confirmation are keyboard-navigable modal surfaces.

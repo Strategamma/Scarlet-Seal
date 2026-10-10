@@ -1,7 +1,7 @@
 # Plan
 
-- Goal: audit every interactive surface and make its placement, accessibility, and responsive behavior coherent from 320px phones through desktop.
-- Scope: home, reconnect, lobby, game, action sheets, rules, leave confirmation, round/match summaries, reactions, disclosures, tooltips, and error states.
-- Approach: close control-state gaps first, add semantic dialog/button behavior, use a two-column desktop table without changing mobile order, and verify every server-backed action through targeted flows.
-- Risks: focus loss after DOM rerenders, inaccessible modal states, desktop grid collisions, short-screen overflow, and mobile-only title tooltips.
-- Verification: static control inventory, 320/375/520/900px layout reasoning, full tests/build, multi-client socket flows, keyboard/dialog audit, and required Playwright attempt.
+- Goal: make hidden information truly private, keep cards selectable, clarify the latest play, and explain every round-ending result.
+- Scope: authoritative game views, card/discard UI, last-play receipt, round summary, rules copy, tests, and durable project notes.
+- Approach: stop sending set-aside identities to clients, remove hover overlays from cards, strengthen the compact play receipt, and add an authoritative round-end explanation with surviving-card reveals.
+- Risks: leaking hidden values through debug output, stale round summaries carrying into a new round, and tied winners needing an accurate explanation.
+- Verification: targeted engine assertions, full tests/build, diff checks, responsive source review, socket flow, and required Playwright attempt.

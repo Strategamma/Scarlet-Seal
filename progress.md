@@ -43,6 +43,9 @@ Original prompt: I want to build a mobile PWA game based on the board game love 
 - Completed a full control/layout audit across home, reconnect, lobby, game, rules, card choice sheets, Case notes, leave confirmation, reactions, and round/match overlays. Added explicit button types, modal semantics and focus containment, retry/share error states, and a match-over Return home action.
 - Added 44px mobile touch targets, readable microcopy floors, focus styling for disclosures, compact short-landscape rules, and a real two-column desktop table while preserving the mobile-first order. Connection dots now expose both visible hover titles and accessible labels; card restrictions are included in accessible names.
 - Verification: all 26 tests, production build, diff validation, and a static handler inventory pass. A real Socket.IO sweep exercised create/list, add/remove bot, react, start, play, round completion, next round, and leave. Required Playwright screenshot capture remains blocked at Chromium launch by the host macOS Mach-port policy.
+- Removed two-player set-aside identities from every client view; clients now receive only the hidden-card count. Removed native card hover tooltips and made decorative card children pointer-transparent so the card button always owns the tap.
+- Round-end state now carries an authoritative reason plus surviving-card reveals. The case-file overlay presents that explanation before the decisive public plays, while the compact last-play receipt wraps actor, card, target, and outcome without obscuring the hand.
+- Verification: all 26 tests, the production PWA build, TypeScript compilation, privacy assertions for client views, both round-end paths, and diff validation pass. Required Playwright QA was attempted against the production server, but Chromium remains blocked before page load by macOS Mach-port policy.
 
 ## TODO
 

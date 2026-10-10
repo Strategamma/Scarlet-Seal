@@ -27,6 +27,7 @@ export interface GameState {
   turnIndex: number; round: number; log: string[]; privateNotice: Record<string, string>;
   winnerIds: string[]; matchWinnerIds: string[];
   lastAction?: { sequence: number; actorId: string; card: CardValue; targetId?: string; resolution: string };
+  roundSummary?: { reason: string; reveals: { playerId: string; card: CardValue }[] };
   actionSequence: number;
   pendingBottom?: { playerId: string; count: number };
 }
@@ -37,10 +38,11 @@ export interface PlayerView {
 }
 export interface GameView {
   phase: GameState['phase']; players: PlayerView[]; hand: CardValue[]; deckCount: number;
-  faceUpRemoved: CardValue[]; turnPlayerId?: string; round: number; log: string[];
+  removedCount: number; turnPlayerId?: string; round: number; log: string[];
   notice?: string; winnerIds: string[]; matchWinnerIds: string[]; legalMoves: Move[];
   bottomChoiceCount: number;
   lastAction?: GameState['lastAction'];
+  roundSummary?: GameState['roundSummary'];
 }
 
 export const tokenTarget = (_count: number) => 3;
@@ -70,7 +72,7 @@ export function createGame(players: Pick<Player, 'id' | 'name' | 'bot'>[], rng =
 
 export function startRound(state: GameState, rng = Math.random): void {
   const previousWinnerId = state.winnerIds[Math.floor(rng() * Math.max(state.winnerIds.length, 1))];
-  state.round += 1; state.phase = 'playing'; state.winnerIds = []; state.matchWinnerIds = []; state.privateNotice = {}; state.pendingBottom = undefined; state.lastAction = undefined;
+  state.round += 1; state.phase = 'playing'; state.winnerIds = []; state.matchWinnerIds = []; state.privateNotice = {}; state.pendingBottom = undefined; state.lastAction = undefined; state.roundSummary = undefined;
   state.players.forEach(p => { p.hand = []; p.discards = []; p.protected = false; p.eliminated = false; });
   const deck = shuffle(makeDeck(), rng);
   state.setAside = deck.pop(); state.faceUpRemoved = state.players.length === 2 ? deck.splice(-3) : [];
@@ -220,6 +222,12 @@ function finishRound(state: GameState): void {
   const winners = survivors.filter(p => (p.hand[0] ?? 0) === bestHand);
   winners.forEach(p => p.tokens++);
   state.winnerIds = winners.map(p => p.id);
+  state.roundSummary = {
+    reason: survivors.length === 1
+      ? `${survivors[0].name} was the last investigator still in the case.`
+      : `The deck ran out. ${survivors.map(player => `${player.name} held ${CARDS[player.hand[0] ?? 0].name} (${player.hand[0] ?? 0})`).join('; ')}. The highest card wins.`,
+    reveals: survivors.map(player => ({ playerId: player.id, card: player.hand[0] ?? 0 }))
+  };
   state.log.push(`${winners.map(p => p.name).join(' & ')} won the round.`);
 
   const wiretapUsers = survivors.filter(p => p.discards.includes(0));
@@ -237,10 +245,10 @@ export function viewFor(state: GameState, playerId: string): GameView {
   return {
     phase: state.phase,
     players: state.players.map(p => ({ id: p.id, name: p.name, tokens: p.tokens, protected: p.protected, eliminated: p.eliminated, connected: p.connected, bot: p.bot, handCount: p.hand.length, discards: p.discards })),
-    hand: viewer?.hand ?? [], deckCount: state.deck.length, faceUpRemoved: state.faceUpRemoved,
+    hand: viewer?.hand ?? [], deckCount: state.deck.length, removedCount: state.faceUpRemoved.length,
     turnPlayerId: state.phase === 'playing' ? current(state).id : undefined, round: state.round,
     log: state.log.slice(-8), notice: state.privateNotice[playerId], winnerIds: state.winnerIds,
-    matchWinnerIds: state.matchWinnerIds, legalMoves: legalMoves(state, playerId), lastAction: state.lastAction,
+    matchWinnerIds: state.matchWinnerIds, legalMoves: legalMoves(state, playerId), lastAction: state.lastAction, roundSummary: state.roundSummary,
     bottomChoiceCount: state.pendingBottom?.playerId === playerId ? state.pendingBottom.count : 0
   };
 }

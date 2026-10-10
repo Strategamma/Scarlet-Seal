@@ -107,6 +107,7 @@ button:focus-visible,input:focus-visible,summary:focus-visible{outline:3px solid
 .table .card-text{min-height:2.6em;font-size:.62rem;line-height:1.25}
 .table .card-meta{display:block;margin-top:4px;padding-top:4px;border-top:1px solid #c9a97b;color:#80695f;font-size:.5rem;line-height:1.2}
 .table .card-count{right:6px;bottom:6px;width:25px;height:25px}
+.table .card>*{pointer-events:none}
 .table .card-badge.restricted{background:#776b66}
 .table .review-cards .card{width:min(29vw,135px);height:210px}
 .table .action-stage{display:flex;align-items:center;gap:10px;min-height:62px;margin:14px 0 8px;padding:8px 10px;border-color:#ddc6a2;border-radius:11px;background:#fffaf1a8;box-shadow:none;overflow:hidden}
@@ -115,9 +116,9 @@ button:focus-visible,input:focus-visible,summary:focus-visible{outline:3px solid
 .last-play-art b{position:absolute;top:3px;left:5px;color:white;font-family:'Cormorant Garamond';font-size:.95rem;text-shadow:0 1px 3px #000}
 .last-play-copy{min-width:0;text-align:left}
 .last-play-copy>small{display:block;color:#98754d;font-size:.48rem;font-weight:800;letter-spacing:.14em}
-.last-play-copy p{margin:2px 0;color:#5a3c3d;font-size:.68rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.last-play-copy p{margin:2px 0;color:#5a3c3d;font-size:.68rem;line-height:1.3}
 .last-play-copy p strong{color:var(--wine)}
-.last-play-copy>span{display:block;color:#806d64;font-size:.58rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.last-play-copy>span{display:block;color:#806d64;font-size:.58rem;line-height:1.35}
 .last-play-copy>em{display:block;margin-top:3px;color:#986f52;font-family:'Cormorant Garamond';font-size:.68rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .action-stage.action-0.animate .last-play-art{animation:wiretap-signal .8s ease}.action-stage.action-1.animate .last-play-art{animation:hunch-snap .62s cubic-bezier(.18,.88,.35,1.25)}.action-stage.action-2.animate .last-play-art{animation:lead-slide .62s ease}.action-stage.action-3.animate .last-play-art{animation:alibi-balance .75s ease}.action-stage.action-4.animate .last-play-art{animation:safehouse-lock .72s ease}.action-stage.action-5.animate .last-play-art{animation:interrogation-slam .55s cubic-bezier(.18,.9,.32,1.2)}.action-stage.action-6.animate .last-play-art{animation:case-review-fan .85s ease}.action-stage.action-7.animate .last-play-art{animation:disguise-flip .72s ease}.action-stage.action-8.animate .last-play-art{animation:red-herring-swerve .85s ease}.action-stage.action-9.animate .last-play-art{animation:evidence-reveal .9s ease}
 .case-notes{margin-top:6px;border-top:1px solid #dcc8aa}
@@ -129,6 +130,15 @@ button:focus-visible,input:focus-visible,summary:focus-visible{outline:3px solid
 .case-notes>summary i{font-size:1.1rem;font-style:normal;transition:.2s transform}
 .case-notes[open]>summary i{transform:rotate(180deg)}
 .case-notes .discard-board{margin:0;padding:8px;min-height:0;background:#fff9ef80}
+.hidden-cards-note{margin:7px 0 2px;padding:7px 8px;border-radius:7px;background:#efe5d6;color:#76645b;font-size:.55rem;line-height:1.35}
+.discard-chip>*{pointer-events:none}
+.round-reason{padding:10px 12px!important;border:1px solid #dcc39d;border-radius:10px;background:#fff8ec}
+.round-reason>p{margin:3px 0 9px;color:#654e49;font-size:.7rem;line-height:1.4}
+.round-reason ul{display:grid;gap:5px;margin:0;padding:0;list-style:none}
+.round-reason li{display:flex;align-items:center;gap:8px;text-align:left}
+.reveal-card{position:relative;display:block;flex:0 0 30px;height:38px;border:1px solid #bc9258;border-radius:5px;background-image:linear-gradient(180deg,transparent 30%,#30101ccc),url('/detective-card-atlas-v2.png');background-size:500% 200%}
+.reveal-card b{position:absolute;top:2px;left:4px;color:#fff;font-family:'Cormorant Garamond';text-shadow:0 1px 3px #000}
+.round-reason li span:last-child b,.round-reason li span:last-child small{display:block}.round-reason li span:last-child small{color:#806d64;font-size:.56rem}
 .case-notes .history{height:auto;min-height:0;padding:9px 4px 2px}
 .case-notes .history ol{height:auto}
 .case-notes .history li{font-size:.6rem}
