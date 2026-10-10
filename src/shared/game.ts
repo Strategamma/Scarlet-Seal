@@ -21,12 +21,14 @@ export interface Player {
   id: string; name: string; hand: CardValue[]; discards: CardValue[];
   tokens: number; protected: boolean; eliminated: boolean; connected: boolean; bot: boolean;
 }
+export interface PublicAction { sequence: number; actorId: string; card: CardValue; targetId?: string; resolution: string }
 export interface GameState {
   phase: 'lobby' | 'playing' | 'round-over' | 'match-over';
   players: Player[]; deck: CardValue[]; setAside?: CardValue; faceUpRemoved: CardValue[];
   turnIndex: number; round: number; log: string[]; privateNotice: Record<string, string>;
   winnerIds: string[]; matchWinnerIds: string[];
-  lastAction?: { sequence: number; actorId: string; card: CardValue; targetId?: string; resolution: string };
+  lastAction?: PublicAction;
+  publicActions: PublicAction[];
   roundSummary?: { reason: string; reveals: { playerId: string; card: CardValue }[] };
   actionSequence: number;
   pendingBottom?: { playerId: string; count: number };
@@ -41,7 +43,8 @@ export interface GameView {
   removedCount: number; turnPlayerId?: string; round: number; log: string[];
   notice?: string; winnerIds: string[]; matchWinnerIds: string[]; legalMoves: Move[];
   bottomChoiceCount: number;
-  lastAction?: GameState['lastAction'];
+  lastAction?: PublicAction;
+  publicActions: PublicAction[];
   roundSummary?: GameState['roundSummary'];
 }
 
@@ -64,7 +67,7 @@ export function createGame(players: Pick<Player, 'id' | 'name' | 'bot'>[], rng =
   if (players.length < MIN_PLAYERS || players.length > MAX_PLAYERS) throw new Error(`A game needs ${MIN_PLAYERS}–${MAX_PLAYERS} players.`);
   const state: GameState = {
     phase: 'lobby', players: players.map(p => ({ ...p, hand: [], discards: [], tokens: 0, protected: false, eliminated: false, connected: true })),
-    deck: [], faceUpRemoved: [], turnIndex: 0, round: 0, log: [], privateNotice: {}, winnerIds: [], matchWinnerIds: [], actionSequence: 0
+    deck: [], faceUpRemoved: [], turnIndex: 0, round: 0, log: [], privateNotice: {}, winnerIds: [], matchWinnerIds: [], publicActions: [], actionSequence: 0
   };
   startRound(state, rng);
   return state;
@@ -72,7 +75,7 @@ export function createGame(players: Pick<Player, 'id' | 'name' | 'bot'>[], rng =
 
 export function startRound(state: GameState, rng = Math.random): void {
   const previousWinnerId = state.winnerIds[Math.floor(rng() * Math.max(state.winnerIds.length, 1))];
-  state.round += 1; state.phase = 'playing'; state.winnerIds = []; state.matchWinnerIds = []; state.privateNotice = {}; state.pendingBottom = undefined; state.lastAction = undefined; state.roundSummary = undefined;
+  state.round += 1; state.phase = 'playing'; state.winnerIds = []; state.matchWinnerIds = []; state.privateNotice = {}; state.pendingBottom = undefined; state.lastAction = undefined; state.publicActions = []; state.roundSummary = undefined;
   state.players.forEach(p => { p.hand = []; p.discards = []; p.protected = false; p.eliminated = false; });
   const deck = shuffle(makeDeck(), rng);
   state.setAside = deck.pop(); state.faceUpRemoved = state.players.length === 2 ? deck.splice(-3) : [];
@@ -135,6 +138,7 @@ export function playCard(state: GameState, playerId: string, move: Move, rng = M
   const target = move.targetId ? state.players.find(p => p.id === move.targetId) : undefined;
   state.lastAction = { sequence: ++state.actionSequence, actorId: actor.id, card: move.card, targetId: target?.id, resolution: 'No immediate effect.' };
   const action = state.lastAction;
+  state.publicActions.push(action);
   state.log.push(`${actor.name} played ${CARDS[move.card].name}${target ? ` on ${target.name}` : ''}.`);
 
   if (move.card === 1 && target && move.guess !== undefined) {
@@ -248,7 +252,7 @@ export function viewFor(state: GameState, playerId: string): GameView {
     hand: viewer?.hand ?? [], deckCount: state.deck.length, removedCount: state.faceUpRemoved.length,
     turnPlayerId: state.phase === 'playing' ? current(state).id : undefined, round: state.round,
     log: state.log.slice(-8), notice: state.privateNotice[playerId], winnerIds: state.winnerIds,
-    matchWinnerIds: state.matchWinnerIds, legalMoves: legalMoves(state, playerId), lastAction: state.lastAction, roundSummary: state.roundSummary,
+    matchWinnerIds: state.matchWinnerIds, legalMoves: legalMoves(state, playerId), lastAction: state.lastAction, publicActions: state.publicActions.map(action => ({ ...action })), roundSummary: state.roundSummary,
     bottomChoiceCount: state.pendingBottom?.playerId === playerId ? state.pendingBottom.count : 0
   };
 }

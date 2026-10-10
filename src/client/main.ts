@@ -2,6 +2,8 @@ import { io, type Socket } from 'socket.io-client';
 import { registerSW } from 'virtual:pwa-register';
 import { CARDS, MAX_PLAYERS, tokenTarget, type CardValue, type Move } from '../shared/game';
 import type { AvailableRoom, ClientToServerEvents, Result, RoomView, ServerToClientEvents, Session } from '../shared/protocol';
+import { turnPresentation } from './turn-presentation';
+import { gameEvents } from './game-events';
 import './styles.css';
 import './redesign.css';
 
@@ -18,8 +20,17 @@ let rulesOpen = false;
 let leaveOpen = false;
 let error = '';
 let busy = false;
-let lastAnimatedAction = 0;
 let animateAction = false;
+let playOrigin: DOMRect | undefined;
+let drawOrigin: DOMRect | undefined;
+let drawFromIndex = 0;
+let turnChanged = false;
+let roundStarted = false;
+let resolvedAction = false;
+let newDiscardCounts = new Map<string, number>();
+let earnedSeals = new Set<string>();
+let newlyOut = new Set<string>();
+let newlyProtected = new Set<string>();
 let availableRooms: AvailableRoom[] = [];
 let restoringSeat = Boolean(session);
 let visibleReactionSequence = 0;
@@ -30,9 +41,28 @@ const socket: Socket<ServerToClientEvents, ClientToServerEvents> = io({ auth: se
 registerSW({ immediate: true });
 socket.on('session', value => { session = value; localStorage.setItem('scarlet-seal-session', JSON.stringify(value)); });
 socket.on('room:state', value => {
-  const sequence = value.game?.lastAction?.sequence ?? 0;
-  animateAction = sequence > 0 && sequence !== lastAnimatedAction;
-  if (sequence) lastAnimatedAction = sequence;
+  const previous = room?.game;
+  const next = value.game;
+  const events = gameEvents(previous, next, session?.playerId);
+  animateAction = events.actionPlayed;
+  roundStarted = events.roundStarted;
+  if (animateAction && next?.lastAction) {
+    const actorId = next.lastAction.actorId;
+    const source = actorId === session?.playerId
+      ? [...document.querySelectorAll<HTMLElement>('.hand .card')].find(card => card.classList.contains('selected') && card.dataset.card === String(next.lastAction?.card))
+        ?? [...document.querySelectorAll<HTMLElement>('.hand .card')].find(card => card.dataset.card === String(next.lastAction?.card))
+      : [...document.querySelectorAll<HTMLElement>('.opponent')].find(seat => seat.dataset.playerId === actorId);
+    playOrigin = source?.getBoundingClientRect();
+  }
+  turnChanged = events.turnChanged;
+  drawFromIndex = events.drawFromIndex ?? 0;
+  drawOrigin = (events.drawFromIndex !== undefined || events.roundStarted) && next?.hand.length
+    ? document.querySelector<HTMLElement>('.deck-count b')?.getBoundingClientRect() : undefined;
+  resolvedAction = events.actionResolved;
+  newDiscardCounts = events.newDiscardCounts;
+  earnedSeals = events.earnedSeals;
+  newlyOut = events.newlyOut;
+  newlyProtected = events.newlyProtected;
   const newReaction = value.reaction?.sequence && value.reaction.sequence !== room?.reaction?.sequence;
   room = value; restoringSeat = false; error = '';
   if (!newReaction) { selectedCard = undefined; selectedTarget = undefined; selectedBottom = []; }
@@ -157,40 +187,24 @@ function lobby(): string {
 function game(): string {
   const game = room!.game!;
   const me = game.players.find(p => p.id === session!.playerId)!;
-  const turn = game.players.find(p => p.id === game.turnPlayerId);
-  const myTurn = game.turnPlayerId === me.id && game.phase === 'playing';
-  const currentIndex = game.players.findIndex(p => p.id === game.turnPlayerId);
-  const nextPlayer = game.phase === 'playing' ? [...game.players.slice(currentIndex + 1), ...game.players.slice(0, currentIndex + 1)].find(p => !p.eliminated && p.id !== game.turnPlayerId) : undefined;
-  const choosingBottom = myTurn && game.bottomChoiceCount > 0;
-  const legal = game.legalMoves;
-  const cardMoves = selectedCard !== undefined ? legal.filter(m => m.card === selectedCard) : [];
-  const targets = [...new Set(cardMoves.map(m => m.targetId).filter(Boolean))] as string[];
-  const targetMoves = selectedTarget ? cardMoves.filter(m => m.targetId === selectedTarget) : cardMoves;
-  const guesses = [...new Set(targetMoves.map(m => m.guess).filter((value): value is CardValue => value !== undefined))];
-  const direct = cardMoves.find(m => !m.targetId && !m.guess);
-  const playable = new Set(legal.map(m => m.card));
-  const forcedCard = myTurn && playable.size === 1 && game.hand.length > 1 ? [...playable][0] : undefined;
-
-  let instruction = `${esc(turn?.name ?? 'Another player')} is choosing a card`;
-  if (choosingBottom) instruction = `Choose ${game.bottomChoiceCount} card${game.bottomChoiceCount === 1 ? '' : 's'} to return`;
-  else if (myTurn && selectedCard === undefined) instruction = forcedCard !== undefined ? `Play your ${CARDS[forcedCard].name} — the other card cannot be played` : 'Choose one card to play';
-  else if (myTurn && selectedCard !== undefined && !selectedTarget && targets.length) instruction = `${CARDS[selectedCard].name}: choose a player`;
-  else if (myTurn && selectedCard !== undefined && selectedTarget && guesses.length) instruction = 'Hunch: name the card they hold';
-  else if (myTurn && selectedCard !== undefined) instruction = `Confirm your ${CARDS[selectedCard].name}`;
+  const ui = turnPresentation(game, me.id, selectedCard, selectedTarget);
+  const { turn, nextPlayer, myTurn, choosingBottom, targets, guesses, playable, forcedCard } = ui;
+  const instruction = esc(ui.title);
+  const turnStep = ui.stepLabel;
 
   let action = '';
-  if (choosingBottom) action = `<div class="action-sheet confirm" aria-label="Return cards"><div class="action-step">CASE REVIEW</div><p>Return ${game.bottomChoiceCount} card${game.bottomChoiceCount === 1 ? '' : 's'} to the bottom</p><small class="action-effect">Tap cards to choose. The unselected card stays in your hand.</small><button type="button" id="confirm-bottom" class="primary" ${selectedBottom.length === game.bottomChoiceCount ? '' : 'disabled'}>Return selected cards</button></div>`;
-  else if (selectedCard !== undefined && !direct && targets.length && !selectedTarget) action = `<div class="action-sheet" aria-label="Choose a player"><div class="action-step">STEP 2 OF ${selectedCard === 1 ? '3' : '2'}</div><h3>Choose a player</h3><p class="action-help">${CARDS[selectedCard].text}</p>${intel(selectedCard)}${targets.map(id => { const p = game.players.find(x => x.id === id)!; return `<button type="button" data-target="${id}"><span class="target-avatar">${p.bot ? '⚙' : esc(p.name[0])}</span><span><b>${esc(p.name)}</b><small>${p.protected ? 'Protected' : 'Available'}</small></span><span>›</span></button>`; }).join('')}<button type="button" class="cancel">Choose a different card</button></div>`;
-  else if (selectedCard !== undefined && selectedTarget && guesses.length) action = `<div class="action-sheet" aria-label="Choose a card guess"><div class="action-step">STEP 3 OF 3</div><h3>What card do they hold?</h3><p class="action-help">A correct guess eliminates ${esc(game.players.find(p => p.id === selectedTarget)?.name ?? 'them')}.</p><div class="guess-grid">${guesses.map(v => `<button type="button" data-guess="${v}"><b>${v}</b>${CARDS[v].name}</button>`).join('')}</div><button type="button" class="cancel">Choose a different card</button></div>`;
-  else if (selectedCard !== undefined && (direct || selectedTarget)) action = `<div class="action-sheet confirm" aria-label="Confirm card play"><div class="action-step">FINAL STEP</div><p>Play <b>${CARDS[selectedCard].name}</b>${selectedTarget ? ` on <b>${esc(game.players.find(p => p.id === selectedTarget)!.name)}</b>` : ''}?</p><small class="action-effect">${CARDS[selectedCard].text}</small>${intel(selectedCard)}<button type="button" id="confirm" class="primary">Confirm play</button><button type="button" class="cancel">Choose a different card</button></div>`;
+  if (ui.phase === 'case-review') action = `<div class="action-sheet confirm" aria-label="Return cards"><div class="action-step">CASE REVIEW</div><p>Return ${game.bottomChoiceCount} card${game.bottomChoiceCount === 1 ? '' : 's'} to the bottom</p><small class="action-effect">Tap cards to choose. The unselected card stays in your hand.</small><button type="button" id="confirm-bottom" class="primary" ${selectedBottom.length === game.bottomChoiceCount ? '' : 'disabled'}>Return selected cards</button></div>`;
+  else if (ui.phase === 'choose-target' && selectedCard !== undefined) action = `<div class="action-sheet" aria-label="Choose a player"><div class="action-step">STEP 2 OF ${selectedCard === 1 ? '3' : '2'}</div><h3>Choose a player</h3><p class="action-help">${CARDS[selectedCard].text}</p>${intel(selectedCard)}${targets.map(id => { const p = game.players.find(x => x.id === id)!; return `<button type="button" data-target="${id}"><span class="target-avatar">${p.bot ? '⚙' : esc(p.name[0])}</span><span><b>${esc(p.name)}</b><small>${p.protected ? 'Protected' : 'Available'}</small></span><span>›</span></button>`; }).join('')}<button type="button" class="cancel">Choose a different card</button></div>`;
+  else if (ui.phase === 'guess' && selectedCard !== undefined && selectedTarget) action = `<div class="action-sheet" aria-label="Choose a card guess"><div class="action-step">STEP 3 OF 3</div><h3>What card do they hold?</h3><p class="action-help">A correct guess eliminates ${esc(game.players.find(p => p.id === selectedTarget)?.name ?? 'them')}.</p><div class="guess-grid">${guesses.map(v => `<button type="button" data-guess="${v}"><b>${v}</b>${CARDS[v].name}</button>`).join('')}</div><button type="button" class="cancel">Choose a different card</button></div>`;
+  else if (ui.phase === 'confirm' && selectedCard !== undefined) action = `<div class="action-sheet confirm" aria-label="Confirm card play"><div class="action-step">FINAL STEP</div><p>Play <b>${CARDS[selectedCard].name}</b>${selectedTarget ? ` on <b>${esc(game.players.find(p => p.id === selectedTarget)!.name)}</b>` : ''}?</p><small class="action-effect">${CARDS[selectedCard].text}</small>${intel(selectedCard)}<button type="button" id="confirm" class="primary">Confirm play</button><button type="button" class="cancel">Choose a different card</button></div>`;
 
   const winningIds = game.phase === 'match-over' ? game.matchWinnerIds : game.winnerIds;
   const winnerNames = winningIds.map(id => game.players.find(p => p.id === id)?.name).filter(Boolean).join(' & ');
   const lastActor = game.players.find(p => p.id === game.lastAction?.actorId);
   const lastTarget = game.players.find(p => p.id === game.lastAction?.targetId);
   const botAside = lastActor?.bot ? `<em>“${['Nothing personal.', 'I had a hunch.', 'Follow the evidence.', 'That story does not add up.', 'You cannot reach me here.', 'Let us try another angle.', 'Every detail matters.', 'New face, same case.', 'A useful distraction.', 'Case closed.'][game.lastAction!.card]}”</em>` : '';
-  const actionStage = game.lastAction && lastActor ? `<section class="action-stage action-${game.lastAction.card} ${animateAction ? 'animate' : ''}" aria-live="polite"><div class="stage-origin"><small>LAST CARD PLAYED</small><strong>${lastActor.id === me.id ? 'You' : esc(lastActor.name)}${lastTarget ? ` <span>→</span> ${lastTarget.id === me.id ? 'You' : esc(lastTarget.name)}` : ''}</strong></div><div class="featured-play">${art(game.lastAction.card, 'featured-art')}<strong>${game.lastAction.card}</strong><span><b>${CARDS[game.lastAction.card].name}</b><small>${CARD_FACE_TEXT[game.lastAction.card]}</small></span></div><p class="action-resolution">${esc(game.lastAction.resolution)}${botAside}</p></section>` : `<section class="action-stage waiting"><span class="empty-discard" aria-hidden="true">✦</span><p>Round ${game.round} is dealt.<br><small>${esc(turn?.name ?? 'The first player')} draws first.</small></p></section>`;
-  const publicDiscards = `<section id="public-cards" class="discard-board" aria-label="All public cards"><div class="discard-heading"><p class="eyebrow">PUBLIC CARDS</p><small>${game.players.length > 3 ? 'Swipe for more →' : 'Use these to narrow the deck'}</small></div>${game.removedCount ? `<p class="hidden-cards-note">${game.removedCount} cards were set aside facedown. Their identities are private.</p>` : ''}<div class="discard-lanes">${game.players.map(player => `<article class="discard-lane ${game.lastAction?.targetId === player.id ? 'targeted' : ''}"><b>${player.id === me.id ? 'You' : esc(player.name)}</b><div>${player.discards.length ? player.discards.map((value, index) => `<span class="discard-chip art-${value} ${game.lastAction?.actorId === player.id && index === player.discards.length - 1 ? 'latest' : ''}" role="img" aria-label="${CARDS[value].name}, value ${value}"><i>${value}</i><small>${CARDS[value].name}</small></span>`).join('') : '<em>None yet</em>'}</div></article>`).join('')}</div></section>`;
+  const actionStage = game.lastAction && lastActor ? `<section class="action-stage action-${game.lastAction.card} ${animateAction ? 'animate' : ''} ${resolvedAction ? 'result-updated' : ''}" aria-live="polite"><div class="stage-origin"><small>LAST CARD PLAYED</small><strong>${lastActor.id === me.id ? 'You' : esc(lastActor.name)}${lastTarget ? ` <span>→</span> ${lastTarget.id === me.id ? 'You' : esc(lastTarget.name)}` : ''}</strong></div><div class="featured-play">${art(game.lastAction.card, 'featured-art')}<strong>${game.lastAction.card}</strong><span><b>${CARDS[game.lastAction.card].name}</b><small>${CARD_FACE_TEXT[game.lastAction.card]}</small></span></div><p class="action-resolution">${esc(game.lastAction.resolution)}${botAside}</p></section>` : `<section class="action-stage waiting"><span class="empty-discard" aria-hidden="true">✦</span><p>Round ${game.round} is dealt.<br><small>${esc(turn?.name ?? 'The first player')} draws first.</small></p></section>`;
+  const publicDiscards = `<section id="public-cards" class="discard-board" aria-label="All public cards"><div class="discard-heading"><p class="eyebrow">PUBLIC CARDS</p><small>${game.players.length > 3 ? 'Swipe for more →' : 'Use these to narrow the deck'}</small></div>${game.removedCount ? `<p class="hidden-cards-note">${game.removedCount} cards were set aside facedown. Their identities are private.</p>` : ''}<div class="discard-lanes">${game.players.map(player => `<article class="discard-lane ${game.lastAction?.targetId === player.id ? 'targeted' : ''}"><b>${player.id === me.id ? 'You' : esc(player.name)}</b><div>${player.discards.length ? player.discards.map((value, index) => `<span class="discard-chip art-${value} ${game.lastAction?.actorId === player.id && index === player.discards.length - 1 ? 'latest' : ''} ${index >= (newDiscardCounts.get(player.id) ?? Infinity) ? 'new-discard' : ''}" role="img" aria-label="${CARDS[value].name}, value ${value}"><i>${value}</i><small>${CARDS[value].name}</small></span>`).join('') : '<em>None yet</em>'}</div></article>`).join('')}</div></section>`;
   const decisivePlays = game.log.filter(line => !line.startsWith('Round ')).slice(-4);
   const roundReveals = game.roundSummary?.reveals.map(reveal => { const player = game.players.find(p => p.id === reveal.playerId); return `<li><span class="reveal-card art-${reveal.card}" aria-hidden="true"><b>${reveal.card}</b></span><span><b>${player?.id === me.id ? 'You' : esc(player?.name ?? 'Player')}</b><small>${CARDS[reveal.card].name} · value ${reveal.card}</small></span></li>`; }).join('') ?? '';
   const roundOverlay = game.phase !== 'playing' ? `<section class="result case-summary round-summary" aria-labelledby="result-title"><div class="seal-stamp" aria-hidden="true"><span>${game.phase === 'match-over' ? 'CASE' : 'ROUND'}</span><b>CLOSED</b></div><p class="eyebrow">${game.phase === 'match-over' ? 'CASE CLOSED' : `ROUND ${game.round} COMPLETE`}</p><h2 id="result-title">${esc(winnerNames || 'A rival')} ${winningIds.length > 1 ? 'win' : 'wins'}!</h2>${game.roundSummary ? `<section class="round-reason"><h3>Why the round ended</h3><p>${esc(game.roundSummary.reason)}</p>${roundReveals ? `<ul>${roundReveals}</ul>` : ''}</section>` : ''}<section><h3>Decisive plays</h3><ol>${decisivePlays.map(line => `<li>${esc(line)}</li>`).join('')}</ol></section>${game.phase === 'round-over' && room!.players.find(p => p.id === me.id)?.host ? '<button type="button" id="next-round" class="primary">Deal next round</button>' : game.phase === 'round-over' ? '<p>Waiting for the host…</p>' : '<p>The case has found its sharpest detective.</p><button type="button" id="finish-home" class="secondary">Return home</button>'}</section>` : '';
@@ -199,16 +213,64 @@ function game(): string {
   const aliveCount = game.players.filter(p => !p.eliminated).length;
   return `<main class="table"><header class="table-header"><span class="table-brand">${logo('mini-crest')}<b>Scarlet Seal</b><small>ROUND ${game.round}</small></span><nav aria-label="Game navigation">${leaveButton()}${rulesButton('Rules')}</nav><span class="deck-count">DRAW PILE <b>${game.deckCount}</b></span></header>
     ${roundOverlay}
-    <section class="game-felt" aria-label="Game table"><section class="table-seats" aria-label="Players in turn order"><div class="table-section-heading"><span>INVESTIGATORS <b>${aliveCount} / ${game.players.length} IN</b></span><small>First to ${tokenTarget(game.players.length)} seals</small></div><div class="opponents">${game.players.map((p, index) => { const isMe = p.id === me.id; const targeted = game.lastAction?.targetId === p.id; const hasTurn = game.turnPlayerId === p.id && game.phase === 'playing'; return `<div class="opponent ${isMe ? 'your-seat' : ''} ${p.eliminated ? 'out' : 'alive'} ${targeted ? 'targeted' : ''} ${hasTurn ? 'current-turn' : ''}"><div class="seat-top"><span class="seat-order">${index + 1}</span><b>${isMe ? 'You' : esc(p.name)}</b><span class="seat-score">${p.tokens} ◆</span></div><div class="seat-bottom"><span class="opponent-card ${p.handCount > 1 ? 'two-cards' : ''}" aria-label="${isMe ? 'Your hand is below' : `${p.handCount} hidden card${p.handCount === 1 ? '' : 's'}`}">${p.eliminated ? '✕' : isMe ? '↓' : '?'}</span><span class="seat-state"><strong>${p.eliminated ? 'OUT' : hasTurn ? (isMe ? 'YOUR TURN' : 'PLAYING') : 'IN'}</strong>${p.protected ? '<small>Shielded</small>' : isMe ? '<small>Your hand below</small>' : `<small>${p.handCount} card${p.handCount === 1 ? '' : 's'}</small>`}</span></div></div>`; }).join('')}</div></section><div class="board-center">${actionStage}</div>${publicDiscards}</section>
-    ${game.phase === 'playing' ? `<section class="decision-zone"><section class="turn-banner ${myTurn ? 'active' : ''}" aria-live="polite"><span class="turn-dot" aria-hidden="true"></span><div><small>${myTurn ? 'YOUR MOVE' : `${esc(turn?.name ?? 'Opponent')}'S MOVE`}</small><p>${instruction}</p></div><span class="turn-next">${nextPlayer ? `NEXT <b>${nextPlayer.id === me.id ? 'YOU' : esc(nextPlayer.name)}</b>` : ''}</span></section>${game.notice ? `<p class="turn-notice"><b>Private clue</b>${esc(game.notice)}</p>` : ''}<section class="play-area"><section class="hand"><div class="hand-heading"><p class="eyebrow">${game.hand.length > 1 ? 'YOUR TWO CARDS' : 'YOUR CARD'}</p><span>${choosingBottom ? `${selectedBottom.length} of ${game.bottomChoiceCount} selected` : myTurn ? 'Choose one to play' : 'Only you can see this'}</span></div><div class="cards ${choosingBottom ? 'review-cards' : ''}">${game.hand.map((v, index) => card(v, index, choosingBottom || (myTurn && playable.has(v)), forcedCard === v, choosingBottom, myTurn && !choosingBottom && !playable.has(v) ? (forcedCard !== undefined ? 'Red Herring must be played' : 'Unavailable now') : '')).join('')}</div></section>${action ? `<div id="turn-action">${action}</div>` : ''}</section></section>` : ''}
-    <nav class="reactions" aria-label="Table reactions"><button type="button" data-reaction="Suspicious">Suspicious</button><button type="button" data-reaction="Nice try">Nice try</button><button type="button" data-reaction="Case closed">Case closed</button></nav><details class="case-feed" aria-label="Recent public plays"><summary>Case notes <span>${game.log.length} updates</span></summary><ol>${game.log.slice(-4).reverse().map(line => `<li>${esc(line)}</li>`).join('')}</ol></details>
+    <section class="game-felt ${roundStarted ? 'round-enter' : ''}" aria-label="Game table"><section class="table-seats" aria-label="Players in turn order"><div class="table-section-heading"><span>INVESTIGATORS <b>${aliveCount} / ${game.players.length} IN</b></span><small>First to ${tokenTarget(game.players.length)} seals</small></div><div class="opponents">${game.players.map((p, index) => { const isMe = p.id === me.id; const targeted = game.lastAction?.targetId === p.id; const hasTurn = game.turnPlayerId === p.id && game.phase === 'playing'; return `<div data-player-id="${p.id}" class="opponent ${isMe ? 'your-seat' : ''} ${p.eliminated ? 'out' : 'alive'} ${targeted ? 'targeted' : ''} ${hasTurn ? 'current-turn' : ''} ${hasTurn && turnChanged ? 'turn-enter' : ''} ${newlyOut.has(p.id) ? 'just-out' : ''} ${newlyProtected.has(p.id) ? 'just-shielded' : ''}"><div class="seat-top"><span class="seat-order">${index + 1}</span><b>${isMe ? 'You' : esc(p.name)}</b><span class="seat-score ${earnedSeals.has(p.id) ? 'seal-earned' : ''}">${p.tokens} ◆</span></div><div class="seat-bottom"><span class="opponent-card ${p.handCount > 1 ? 'two-cards' : ''}" aria-label="${isMe ? 'Your hand is below' : `${p.handCount} hidden card${p.handCount === 1 ? '' : 's'}`}">${p.eliminated ? '✕' : isMe ? '↓' : '?'}</span><span class="seat-state"><strong>${p.eliminated ? 'OUT' : hasTurn ? (isMe ? 'YOUR TURN' : 'PLAYING') : 'IN'}</strong>${p.protected ? '<small>Shielded</small>' : isMe ? '<small>Your hand below</small>' : `<small>${p.handCount} card${p.handCount === 1 ? '' : 's'}</small>`}</span></div></div>`; }).join('')}</div></section><div class="board-center">${actionStage}</div>${publicDiscards}</section>
+    ${game.phase === 'playing' ? `<section class="decision-zone"><section class="turn-banner ${myTurn ? 'active' : ''} ${turnChanged ? 'turn-enter' : ''}" aria-live="polite"><span class="turn-dot" aria-hidden="true"></span><div><small>${turnStep}</small><p>${instruction}</p></div><span class="turn-next">${nextPlayer ? `NEXT <b>${nextPlayer.id === me.id ? 'YOU' : esc(nextPlayer.name)}</b>` : ''}</span></section>${game.notice ? `<p class="turn-notice"><b>Private clue</b>${esc(game.notice)}</p>` : ''}<section class="play-area"><section class="hand"><div class="hand-heading"><p class="eyebrow">${game.hand.length > 1 ? 'YOUR TWO CARDS' : 'YOUR CARD'}</p><span>${choosingBottom ? `${selectedBottom.length} of ${game.bottomChoiceCount} selected` : myTurn ? 'Choose one to play' : 'Only you can see this'}</span></div><div class="cards ${choosingBottom ? 'review-cards' : ''}">${game.hand.map((v, index) => card(v, index, choosingBottom || (myTurn && playable.has(v)), forcedCard === v, choosingBottom, myTurn && !choosingBottom && !playable.has(v) ? (forcedCard !== undefined ? 'Red Herring must be played' : 'Unavailable now') : '')).join('')}</div></section>${action ? `<div id="turn-action">${action}</div>` : ''}</section></section>` : ''}
+    <details class="reactions"><summary>React to the table <span aria-hidden="true">✦</span></summary><nav aria-label="Table reactions"><button type="button" data-reaction="Suspicious">Suspicious</button><button type="button" data-reaction="Nice try">Nice try</button><button type="button" data-reaction="Case closed">Case closed</button></nav></details><details class="case-feed" aria-label="Recent public plays"><summary>Case notes <span>${game.publicActions.length} plays</span></summary><ol>${game.publicActions.slice(-5).reverse().map(event => { const actor = game.players.find(p => p.id === event.actorId); const target = game.players.find(p => p.id === event.targetId); return `<li><span class="play-value">${event.card}</span><span><b>${actor?.id === me.id ? 'You' : esc(actor?.name ?? 'Player')} played ${CARDS[event.card].name}${target ? ` on ${target.id === me.id ? 'you' : esc(target.name)}` : ''}</b><small>${esc(event.resolution)}</small></span></li>`; }).join('')}</ol></details>
     ${reaction && reactionPlayer ? `<div class="reaction-pop" role="status"><b>${reactionPlayer.id === me.id ? 'You' : esc(reactionPlayer.name)}</b><span>${reaction.text}</span></div>` : ''}${error ? `<p class="error">${esc(error)}</p>` : ''}</main>${rulesSheet()}${leaveSheet()}`;
 }
 
+function animateGameState(origin: DOMRect | undefined, deck: DOMRect | undefined, fromIndex: number): void {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const featured = document.querySelector<HTMLElement>('.action-stage.animate .featured-play');
+  if (featured && origin) {
+    const stage = featured.closest<HTMLElement>('.action-stage');
+    stage?.classList.remove('animate');
+    if (stage) stage.style.overflow = 'visible';
+    const end = featured.getBoundingClientRect();
+    const dx = origin.left + origin.width / 2 - end.left - end.width / 2;
+    const dy = origin.top + origin.height / 2 - end.top - end.height / 2;
+    const animation = featured.animate([
+      { opacity: .25, transform: `translate(${dx}px, ${dy}px) scale(.42) rotate(-14deg)` },
+      { opacity: 1, transform: 'translate(0, -7px) scale(1.05) rotate(2deg)', offset: .78 },
+      { opacity: 1, transform: 'rotate(-3deg)' }
+    ], { duration: 680, easing: 'cubic-bezier(.2,.75,.25,1)', fill: 'none' });
+    animation.onfinish = () => { if (stage) stage.style.overflow = ''; };
+  }
+  if (deck) {
+    const cards = [...document.querySelectorAll<HTMLElement>('.hand .card')].slice(fromIndex);
+    cards.forEach((card, index) => {
+      const end = card.getBoundingClientRect();
+      const dx = deck.left + deck.width / 2 - end.left - end.width / 2;
+      const dy = deck.top + deck.height / 2 - end.top - end.height / 2;
+      card.animate([
+        { opacity: 0, transform: `translate(${dx}px, ${dy}px) scale(.35) rotate(12deg)` },
+        { opacity: 1, transform: 'translate(0, -8px) scale(1.04) rotate(-2deg)', offset: .82 },
+        { opacity: 1, transform: 'none' }
+      ], { duration: 600, delay: index * 100, easing: 'cubic-bezier(.2,.75,.25,1)', fill: 'none' });
+    });
+  }
+}
+
 function render(): void {
+  const origin = animateAction ? playOrigin : undefined;
+  const deck = drawOrigin;
+  const fromIndex = drawFromIndex;
   root.innerHTML = !room ? landing() : room.game ? game() : lobby();
   animateAction = false;
+  playOrigin = undefined;
+  drawOrigin = undefined;
+  turnChanged = false;
+  roundStarted = false;
+  resolvedAction = false;
+  newDiscardCounts = new Map();
+  earnedSeals = new Set();
+  newlyOut = new Set();
+  newlyProtected = new Set();
   bind();
+  if (origin || deck) {
+    const screen = root.firstElementChild;
+    requestAnimationFrame(() => { if (root.firstElementChild === screen) animateGameState(origin, deck, fromIndex); });
+  }
   requestAnimationFrame(() => {
     const modal = document.querySelector<HTMLElement>('.confirm-dialog');
     if (!modal) return;
@@ -222,6 +284,8 @@ function render(): void {
     });
   });
 }
+
+const revealTurnAction = () => requestAnimationFrame(() => document.querySelector('#turn-action')?.scrollIntoView({ block: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }));
 
 function bind(): void {
   document.querySelectorAll('[data-open-rules]').forEach(el => el.addEventListener('click', () => { rulesOpen = true; render(); requestAnimationFrame(() => document.querySelector<HTMLElement>('#close-rules')?.focus()); }));
@@ -257,14 +321,14 @@ function bind(): void {
     const moves = room!.game!.legalMoves.filter(move => move.card === value);
     const direct = moves.find(move => !move.targetId && move.guess === undefined);
     if (direct && moves.length === 1 && [0, 4, 6, 8].includes(value)) { play(direct); return; }
-    selectedCard = value; selectedTarget = undefined; render();
+    selectedCard = value; selectedTarget = undefined; render(); revealTurnAction();
   }));
   document.querySelectorAll<HTMLElement>('[data-bottom-index]').forEach(el => el.addEventListener('click', () => {
     const index = Number(el.dataset.bottomIndex);
     selectedBottom = selectedBottom.includes(index) ? selectedBottom.filter(value => value !== index) : selectedBottom.length < room!.game!.bottomChoiceCount ? [...selectedBottom, index] : selectedBottom;
     render();
   }));
-  document.querySelectorAll<HTMLElement>('[data-target]').forEach(el => el.addEventListener('click', () => { selectedTarget = el.dataset.target; render(); }));
+  document.querySelectorAll<HTMLElement>('[data-target]').forEach(el => el.addEventListener('click', () => { selectedTarget = el.dataset.target; render(); revealTurnAction(); }));
   document.querySelectorAll<HTMLElement>('[data-guess]').forEach(el => el.addEventListener('click', () => play({ card: selectedCard!, targetId: selectedTarget, guess: Number(el.dataset.guess) as CardValue })));
   document.querySelector('#confirm')?.addEventListener('click', () => play({ card: selectedCard!, targetId: selectedTarget }));
   document.querySelector('#confirm-bottom')?.addEventListener('click', () => emit(cb => socket.emit('game:return-cards', selectedBottom.map(index => room!.game!.hand[index]), cb)));

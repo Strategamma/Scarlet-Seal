@@ -47,6 +47,8 @@ Original prompt: I want to build a mobile PWA game based on the board game love 
 - Round-end state now carries an authoritative reason plus surviving-card reveals. The case-file overlay presents that explanation before the decisive public plays, while the compact last-play receipt wraps actor, card, target, and outcome without obscuring the hand.
 - Verification: all 26 tests, the production PWA build, TypeScript compilation, privacy assertions for client views, both round-end paths, and diff validation pass. Required Playwright QA was attempted against the production server, but Chromium remains blocked before page load by macOS Mach-port policy.
 
+- Added state-driven movement for dealt/drawn and played cards, turn handoff, fresh discards, choices, protection, eliminations, and seals. Played cards travel from the actor's former seat or hand to the central pile; reduced-motion disables travel. Production build and 26 tests pass. Live animation review remains blocked by the previously denied local browser access.
+
 ## TODO
 
 - Configure the production host/reverse proxy and DNS outside this repository.

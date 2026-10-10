@@ -1,7 +1,7 @@
 # Plan
 
-- Goal: make the existing game immediately readable and playable from one table.
-- Scope: home, lobby, live board, hand, in-page choices, public discards, and round results; preserve reconnect, reactions, and game rules.
-- Approach: dark felt table, compact seat states, central last play, short card-face copy, warm paper decisions, and expandable case notes.
-- Risks: small screens and long result text; live browser access is unavailable in this environment.
-- Verification: TypeScript/production build, tests, source review of all turn states, and responsive QA when browser access is available.
+- Goal: make movement explain each play, turn change, and reward.
+- Scope: draw, play, discard, turn handoff, choices, and seal awards in the existing UI; preserve rules and accessibility.
+- Approach: derive animation triggers from authoritative state changes, move the played card from its source seat or hand to the discard stage, and use short entrance animations for related feedback.
+- Risks: rapid bot updates, repeated room renders, and reduced-motion preferences; browser access was denied in this environment.
+- Verification: TypeScript/build, tests, source inspection of state transitions, and live motion QA when browser access is available.
