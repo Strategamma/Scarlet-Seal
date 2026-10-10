@@ -1,7 +1,7 @@
 # Plan
 
-- Goal: make hidden information truly private, keep cards selectable, clarify the latest play, and explain every round-ending result.
-- Scope: authoritative game views, card/discard UI, last-play receipt, round summary, rules copy, tests, and durable project notes.
-- Approach: stop sending set-aside identities to clients, remove hover overlays from cards, strengthen the compact play receipt, and add an authoritative round-end explanation with surviving-card reveals.
-- Risks: leaking hidden values through debug output, stale round summaries carrying into a new round, and tied winners needing an accurate explanation.
-- Verification: targeted engine assertions, full tests/build, diff checks, responsive source review, socket flow, and required Playwright attempt.
+- Goal: make the existing game immediately readable and playable from one table.
+- Scope: home, lobby, live board, hand, in-page choices, public discards, and round results; preserve reconnect, reactions, and game rules.
+- Approach: dark felt table, compact seat states, central last play, short card-face copy, warm paper decisions, and expandable case notes.
+- Risks: small screens and long result text; live browser access is unavailable in this environment.
+- Verification: TypeScript/production build, tests, source review of all turn states, and responsive QA when browser access is available.
