@@ -33,6 +33,9 @@ Original prompt: I want to build a mobile PWA game based on the board game love 
 - Added ten distinct card animations: signal pulse, hunch snap, lead slide, alibi balance, safehouse lock, interrogation slam, case-review fan, disguise flip, red-herring swerve, and evidence reveal. Reduced-motion disables all nonessential motion.
 - Replaced the portrait set with `detective-card-atlas-v2.png`, an original diverse urban-mystery ensemble with no royal/court likenesses. Generated through the built-in image tool and visually inspected after project optimization.
 - Verification: 23/23 tests and production build pass; a live six-seat action exposed actor/card/target/resolution and public discard while all alive states remained accurate. Playwright was retried but remains blocked by the macOS Mach port policy.
+- Rebuilt the lobby and active-table hierarchy from user screenshots: compact room identity and seats, removed the redundant turn tutorial, moved the turn prompt and hand ahead of secondary information, reduced normal hand height, converted the last action into a compact receipt, and placed public cards/history in an accessible “Case notes” disclosure.
+- Preserved three-card Case Review sizing and all ten per-card last-play animations, including reduced-motion behavior. Added `UIUXVisions.md` with the durable one-primary-action and progressive-disclosure direction.
+- Verification: 24/24 tests and production build pass. The required Playwright runner was attempted after the UI change but macOS again blocked Chromium at process launch, so no new automated screenshots were available in this environment.
 
 ## TODO
 

@@ -62,3 +62,90 @@ button:focus-visible,input:focus-visible{outline:3px solid #167d88;outline-offse
 @media (max-height:700px){.action-stage{min-height:88px;margin-bottom:5px}.featured-play{height:72px}.discard-board{min-height:70px}.history{height:42px}}
 @media (prefers-reduced-motion:reduce){.card.playable,.discard-chip.latest,.opponent.targeted,.opponent.current-turn,.action-stage.animate .featured-play,.action-stage.animate .target,.action-stage.animate .action-arrow{animation:none}}
 @media (display-mode:standalone){body{overscroll-behavior:none}}
+
+/* Focused table layout: one decision first, reference information on demand. */
+.lobby{display:flex;flex-direction:column;min-height:100dvh;padding-top:calc(12px + env(safe-area-inset-top))}
+.lobby .room-code{display:flex;align-items:center;justify-content:space-between;padding:18px 2px 16px;text-align:left}
+.lobby .room-code .eyebrow{margin:0 0 2px;font-size:.56rem}
+.lobby .room-code h2{font-size:2.65rem;letter-spacing:.1em}
+.lobby .room-code .text-button{margin:0;padding:10px 0 10px 12px;font-size:.72rem;font-weight:700;text-decoration:none}
+.lobby .seat-heading{margin:0 2px 8px}
+.lobby .seat-heading .eyebrow{display:none}
+.lobby .seat-heading h3{font-size:1.55rem}
+.lobby .player-row{min-height:52px;padding:8px 11px;background:#fffaf5cc}
+.lobby .player-row .avatar{width:34px;height:34px}
+.lobby .seat-controls{margin-top:8px;padding:8px 10px;background:#fffaf166}
+.lobby .lobby-actions{margin-top:auto;padding-top:14px}
+.lobby .lobby-actions .primary{min-height:52px;font-size:.82rem}
+
+.table{display:block;min-height:100dvh;padding-top:calc(8px + env(safe-area-inset-top));padding-bottom:calc(22px + env(safe-area-inset-bottom));overflow:visible}
+.table>header{height:40px}
+.table .opponents{gap:6px;padding:9px 0 7px}
+.table .opponent{display:grid;grid-template-columns:30px minmax(0,1fr);grid-template-rows:auto auto;align-items:center;column-gap:7px;min-width:104px;max-width:136px;padding:6px 8px;text-align:left;background:#fffaf184;border:1px solid #e3d1b7;border-radius:10px}
+.table .opponent .avatar{grid-row:1/3;width:30px;height:30px;margin:0}
+.table .opponent>b{margin:0;font-size:.62rem}
+.table .opponent>span,.table .opponent>small:not(.life-state){display:none}
+.table .opponent .life-state{width:auto;margin:2px 0 0;padding:0;background:transparent;color:#6c8069;font-size:.42rem}
+.table .opponent.current-turn{background:#fff4d9}
+.table .opponent.current-turn .life-state{background:transparent;color:#9a6817}
+.table .score-strip{margin:2px 0 7px}
+.table .turn-banner{min-height:64px;padding:10px 12px}
+.table .turn-banner p{font-size:1.35rem}
+.table .turn-banner strong{font-size:.62rem}
+.table .hand{margin:12px 0 0}
+.table .hand-heading{margin-bottom:7px}
+.table .cards{gap:8px}
+.table .card{width:min(43vw,176px);height:232px;aspect-ratio:auto;padding:9px;border-width:1px;border-radius:12px;box-shadow:0 6px 16px #4f2a1f22}
+.table .card.playable{box-shadow:0 0 0 2px #fff8e8,0 0 0 4px #bd8b35,0 8px 20px #4f2a1f25}
+.table .card-art{inset:4px 4px 41%;border-radius:8px 8px 4px 4px}
+.table .card:before{inset:57% 0 0}
+.table .card-value{top:7px;left:7px;width:29px;height:29px;font-size:1.45rem}
+.table .card-copy{padding-right:22px}
+.table .card-name{font-size:1.16rem}
+.table .card-text{min-height:2.6em;font-size:.58rem;line-height:1.25}
+.table .card-count{right:6px;bottom:6px;width:25px;height:25px}
+.table .review-cards .card{width:min(29vw,135px);height:210px}
+.table .action-stage{display:flex;align-items:center;gap:10px;min-height:62px;margin:14px 0 8px;padding:8px 10px;border-color:#ddc6a2;border-radius:11px;background:#fffaf1a8;box-shadow:none;overflow:hidden}
+.table .action-stage.waiting{min-height:48px;margin-bottom:8px}
+.last-play-art{position:relative;display:block;flex:0 0 44px;height:48px;border:1px solid #bc9258;border-radius:7px;background-image:linear-gradient(180deg,transparent 30%,#30101ccc),url('/detective-card-atlas-v2.png');background-size:500% 200%;box-shadow:0 3px 8px #3c152329}
+.last-play-art b{position:absolute;top:3px;left:5px;color:white;font-family:'Cormorant Garamond';font-size:.95rem;text-shadow:0 1px 3px #000}
+.last-play-copy{min-width:0;text-align:left}
+.last-play-copy>small{display:block;color:#98754d;font-size:.48rem;font-weight:800;letter-spacing:.14em}
+.last-play-copy p{margin:2px 0;color:#5a3c3d;font-size:.68rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.last-play-copy p strong{color:var(--wine)}
+.last-play-copy>span{display:block;color:#806d64;font-size:.58rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.action-stage.action-0.animate .last-play-art{animation:wiretap-signal .8s ease}.action-stage.action-1.animate .last-play-art{animation:hunch-snap .62s cubic-bezier(.18,.88,.35,1.25)}.action-stage.action-2.animate .last-play-art{animation:lead-slide .62s ease}.action-stage.action-3.animate .last-play-art{animation:alibi-balance .75s ease}.action-stage.action-4.animate .last-play-art{animation:safehouse-lock .72s ease}.action-stage.action-5.animate .last-play-art{animation:interrogation-slam .55s cubic-bezier(.18,.9,.32,1.2)}.action-stage.action-6.animate .last-play-art{animation:case-review-fan .85s ease}.action-stage.action-7.animate .last-play-art{animation:disguise-flip .72s ease}.action-stage.action-8.animate .last-play-art{animation:red-herring-swerve .85s ease}.action-stage.action-9.animate .last-play-art{animation:evidence-reveal .9s ease}
+.case-notes{margin-top:6px;border-top:1px solid #dcc8aa}
+.case-notes>summary{display:flex;align-items:center;justify-content:space-between;padding:11px 3px;color:var(--wine);cursor:pointer;list-style:none}
+.case-notes>summary::-webkit-details-marker{display:none}
+.case-notes>summary span,.case-notes>summary b,.case-notes>summary small{display:block}
+.case-notes>summary b{font-family:'Cormorant Garamond';font-size:1rem}
+.case-notes>summary small{margin-top:1px;color:#8a7569;font-size:.55rem;font-weight:400}
+.case-notes>summary i{font-size:1.1rem;font-style:normal;transition:.2s transform}
+.case-notes[open]>summary i{transform:rotate(180deg)}
+.case-notes .discard-board{margin:0;padding:8px;min-height:0;background:#fff9ef80}
+.case-notes .history{height:auto;min-height:0;padding:9px 4px 2px}
+.case-notes .history ol{height:auto}
+.case-notes .history li{font-size:.6rem}
+
+@media (max-width:380px){
+  .lobby .room-code{padding:14px 2px 12px}
+  .lobby .room-code h2{font-size:2.3rem}
+  .lobby .player-row{min-height:48px}
+  .table .opponent{min-width:96px;padding:5px 6px}
+  .table .card{width:calc(50vw - 18px);height:218px}
+  .table .card-name{font-size:1.05rem}
+  .table .turn-banner p{font-size:1.2rem}
+}
+@media (max-height:700px){
+  .lobby .room-code{padding-top:10px}
+  .lobby .player-row{min-height:46px}
+  .lobby .lobby-actions{padding-top:10px}
+  .table .opponents{padding:6px 0}
+  .table .turn-banner{min-height:56px;padding:8px 10px}
+  .table .hand{margin-top:9px}
+  .table .card{height:205px}
+  .table .review-cards .card{height:190px}
+  .table .action-stage{margin-top:11px}
+}
+@media (prefers-reduced-motion:reduce){.action-stage.animate .last-play-art{animation:none}}

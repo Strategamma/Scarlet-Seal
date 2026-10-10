@@ -1,7 +1,7 @@
 # Plan
 
-- Goal: get solo and LAN players into games from the home screen with fewer decisions and taps.
-- Scope: one-tap bot play, one shared multiplayer name, and a list of joinable waiting rooms with code fallback.
-- Approach: expose safe lobby summaries through the existing Socket.IO service, render them as join actions, and keep identity only in the multiplayer section.
-- Risks: stale room listings, accidentally exposing private game state, full/started rooms changing before join, and cramped mobile layout.
-- Verification: room-list service tests, full tests/build, and Playwright checks for solo, room creation, visible-room join, code join, responsive layout, and console errors.
+- Goal: make the lobby and active game immediately readable on phones without removing useful deduction information.
+- Scope: lobby density, active-turn hierarchy, hand sizing, last-action presentation, and progressive disclosure for public cards/history.
+- Approach: keep one primary decision surface, compress status into edge strips, move reference information into a native disclosure, and reduce oversized decorative panels.
+- Risks: hiding information needed for deduction, cramped two-card hands, inaccessible collapsed content, and short-screen overflow.
+- Verification: tests/build, room and solo network flows, narrow/short layout review, disclosure and card-selection interactions, text-state parity, and Playwright attempt.
