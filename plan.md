@@ -1,7 +1,7 @@
 # Plan
 
-- Goal: make finished matches easy to replay and reduce touch-screen UI clutter.
-- Scope: same-room rematch, match result actions, turn decision panels, reactions, and first-round guidance.
-- Approach: restart a fresh authoritative game with connected seats; keep one prominent action at a time, fold optional details, and use large labeled icon controls.
-- Risks: disconnected seats during rematch, stale bot timers, narrow-screen targets, and unverified visual layout without browser access.
-- Verification: service and rules tests for rematch authorization/reset, production build, diff check, and responsive playtest when browser access is available.
+- Goal: make hand cards readable and satisfying on narrow touch screens and desktop.
+- Scope: card hierarchy, selected/review/locked states, choice focus, and duplicate-submit feedback.
+- Approach: keep the existing DOM and rules; give value, name, effect, and action distinct areas; preserve full rule text for assistive tech; make decision transitions focus the next control.
+- Risks: long card names and effects at 320px, forced-play badges, reduced-motion behavior, and unavailable browser visual QA.
+- Verification: tests, build, diff check, source review of card states and responsive CSS.

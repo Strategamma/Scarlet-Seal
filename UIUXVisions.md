@@ -8,6 +8,7 @@ Scarlet Seal belongs to Decadence Inc.: dark grid, coral/scarlet, amber, bold sa
 - Back moves one step through a decision; leaving a room requires confirmation. Rules stay available during play.
 - Board shows seats, alive/out state, seal scores, draw pile, last card with actor/target/result, and public discards. Recent public plays are in Case notes.
 - Icons support short text labels. An unfamiliar symbol never carries a rule alone.
+- Hand cards read value → name → effect → target/choice and deck copies. Symbols are small supporting cues; selected, locked, and Case Review return states stay visible without shrinking the rule text.
 - Animate actual state changes once: draw, play, discard, handoff, elimination, protection, and seal. Respect reduced motion.
 - Mobile at 320–520px must avoid overlap and keep two hand cards legible; desktop separates shared board and personal choices. Non-card controls need 44px touch targets.
 - Newcomer testing is the quality gate: observe people starting, taking turns, reading outcomes, using back/leave, and explaining how they won without help.
