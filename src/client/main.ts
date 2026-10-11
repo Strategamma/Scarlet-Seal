@@ -2,8 +2,9 @@ import { io, type Socket } from 'socket.io-client';
 import { registerSW } from 'virtual:pwa-register';
 import { CARDS, MAX_PLAYERS, tokenTarget, type CardValue, type Move } from '../shared/game';
 import type { AvailableRoom, ClientToServerEvents, Result, RoomView, ServerToClientEvents, Session } from '../shared/protocol';
-import { turnPresentation } from './turn-presentation';
+import { cardPlayPreview, needsPlayConfirmation, turnPresentation } from './turn-presentation';
 import { gameEvents } from './game-events';
+import { isNewPersonalTurn, playTurnSound, unlockTurnSound } from './turn-cue';
 import './styles.css';
 import './redesign.css';
 
@@ -28,6 +29,8 @@ let playOrigin: DOMRect | undefined;
 let drawOrigin: DOMRect | undefined;
 let drawFromIndex = 0;
 let turnChanged = false;
+let turnCue = false;
+let soundEnabled = localStorage.getItem('scarlet-seal-sound') !== 'off';
 let roundStarted = false;
 let resolvedAction = false;
 let newDiscardCounts = new Map<string, number>();
@@ -47,6 +50,8 @@ socket.on('room:state', value => {
   const previous = room?.game;
   const next = value.game;
   const events = gameEvents(previous, next, session?.playerId);
+  const myTurnStarted = isNewPersonalTurn(previous, next, session?.playerId);
+  turnCue = myTurnStarted;
   animateAction = events.actionPlayed;
   roundStarted = events.roundStarted;
   if (animateAction && next?.lastAction) {
@@ -75,7 +80,14 @@ socket.on('room:state', value => {
     window.setTimeout(() => { if (visibleReactionSequence === value.reaction?.sequence) { visibleReactionSequence = 0; render(); } }, 2400);
   }
   render();
+  if (myTurnStarted) {
+    playTurnSound(soundEnabled);
+    const badge = document.querySelector('.turn-alert');
+    window.setTimeout(() => badge?.remove(), 2400);
+  }
 });
+window.addEventListener('pointerdown', unlockTurnSound, { passive: true });
+window.addEventListener('keydown', unlockTurnSound);
 socket.on('connect_error', () => { error = 'Unable to reach the game server.'; render(); });
 const refreshRooms = () => socket.emit('rooms:list', result => {
   if (!result.ok || room) return;
@@ -124,6 +136,10 @@ const CARD_FACE_TEXT: Record<CardValue, string> = {
 };
 const CARD_SYMBOLS: Record<CardValue, string> = { 0: '◎', 1: '?', 2: '◉', 3: '⚖', 4: '⬡', 5: '↻', 6: '▣', 7: '⇄', 8: '◆', 9: '!' };
 const art = (value: CardValue, className = 'card-art') => `<span class="${className} art-${value}" aria-hidden="true"></span>`;
+const privateClue = (notice: string) => {
+  const clue = /^(.+) holds (.+)\.$/.exec(notice);
+  return `<aside class="turn-notice" aria-label="Private clue"><span class="notice-mark" aria-hidden="true">◉</span><span class="notice-copy"><small>PRIVATE CLUE · ONLY YOU</small><strong>${clue ? `${esc(clue[1])} <em>holds</em> <span>${esc(clue[2])}</span>` : esc(notice)}</strong></span></aside>`;
+};
 const CARD_INTEL: Record<CardValue, { choice: string; reveal: string }> = {
   0: { choice: 'No target', reveal: 'Your play is public' }, 1: { choice: 'Target + guess', reveal: 'Guess and result are public' },
   2: { choice: 'Choose a rival', reveal: 'Their card stays private' }, 3: { choice: 'Choose a rival', reveal: 'Outcome is public' },
@@ -135,8 +151,10 @@ const card = (value: CardValue, index: number, interactive = false, forced = fal
   const data = CARDS[value];
   const selected = bottomChoice ? selectedKeepIndex === index : selectedCard === value && selectedCardIndex === index;
   const returning = bottomChoice && selectedKeepIndex !== undefined && !selected;
+  const direct = room?.game?.legalMoves.find(move => move.card === value && move.targetId === undefined && move.guess === undefined);
+  const tapHint = direct && room?.game && !needsPlayConfirmation(room.game, direct, index) ? ' Tap to play now.' : ' Tap to choose this card.';
   const dataAttr = bottomChoice ? `data-bottom-index="${index}"` : `data-card="${value}" data-card-index="${index}"`;
-  return `<button type="button" aria-label="${data.name}, value ${value}. ${data.text}${restriction ? ` ${restriction}.` : bottomChoice ? selected ? ' Selected to keep.' : returning ? ' Will return to the deck. Tap to keep instead.' : ' Tap to keep this card.' : interactive ? ' Select this card.' : ''}" ${interactive ? `aria-pressed="${selected}"` : ''} class="card card-${value}${selected ? ' selected' : ''}${returning ? ' returning' : ''}${interactive ? ' playable' : ''}" ${interactive ? dataAttr : 'disabled'}>
+  return `<button type="button" aria-label="${data.name}, value ${value}. ${data.text}${restriction ? ` ${restriction}.` : bottomChoice ? selected ? ' Selected to keep.' : returning ? ' Will return to the deck. Tap to keep instead.' : ' Tap to keep this card.' : interactive ? tapHint : ''}" ${interactive ? `aria-pressed="${selected}"` : ''} class="card card-${value}${selected ? ' selected' : ''}${returning ? ' returning' : ''}${interactive ? ' playable' : ''}" ${dataAttr} ${interactive ? '' : 'disabled'}>
     ${forced ? '<span class="card-badge">Must play</span>' : restriction ? '<span class="card-badge restricted">Locked</span>' : ''}${bottomChoice ? `<span class="review-state">${selected ? 'KEEP' : returning ? 'RETURN' : 'CHOOSE'}</span>` : ''}<span class="card-top"><span class="card-value"><small>VALUE</small>${value}</span><span class="card-symbol" aria-hidden="true">${CARD_SYMBOLS[value]}</span></span><span class="card-copy"><span class="card-name">${data.name}</span><span class="card-text">${CARD_FACE_TEXT[value]}</span></span><span class="card-foot"><span class="card-meta">${restriction || CARD_INTEL[value].choice}</span><span class="card-count">${data.count} ${data.count === 1 ? 'copy' : 'copies'}</span></span>
   </button>`;
 };
@@ -197,23 +215,26 @@ function game(): string {
   const { turn, nextPlayer, myTurn, choosingBottom, targets, guesses, playable, forcedCard } = ui;
   const ownPlay = ui.lastOwnAction && game.lastAction?.sequence !== ui.lastOwnAction.sequence ? ui.lastOwnAction : undefined;
   const ownTarget = ownPlay ? game.players.find(player => player.id === ownPlay.targetId) : undefined;
-  const ownReceipt = ownPlay ? `<div class="own-receipt" role="status"><span class="receipt-icon" aria-hidden="true">✓</span><span><b>Your last move: ${CARDS[ownPlay.card].name}${ownTarget ? ` → ${esc(ownTarget.name)}` : ''}</b><small>${esc(ownPlay.resolution)}</small></span></div>` : '';
+  const ownReceipt = ownPlay ? `<div class="own-receipt" role="status"><span class="receipt-icon" aria-hidden="true">✓</span><span><b>Your last move: ${CARDS[ownPlay.card].name}${ownTarget ? ` → ${esc(ownTarget.name)}` : ''}${ownPlay.guess !== undefined ? ` · guessed ${CARDS[ownPlay.guess].name}` : ''}</b><small>${esc(ownPlay.resolution)}</small></span></div>` : '';
   const instruction = esc(ui.title);
   const turnStep = ui.stepLabel;
+  const heldCard = game.hand.find((_, index) => index !== selectedCardIndex);
+  const selfEvidenceRisk = selectedCard === 5 && selectedTarget === me.id && heldCard === 9;
   const firstRoundTip = showFirstRoundTips && game.round === 1 && ui.tip ? `<div class="turn-guide"><span aria-hidden="true">ⓘ</span><small>${esc(ui.tip)}</small><button type="button" id="hide-tips" aria-label="Hide first round tips">×</button></div>` : '';
 
   let action = '';
-  if (ui.phase === 'case-review') action = `<div class="action-sheet confirm" aria-label="Keep a card"><div class="action-step">CASE REVIEW</div><p>Keep one card</p><small class="action-effect">Tap the card you want in your hand. The others return unseen.</small><button type="button" id="confirm-bottom" class="primary" ${!busy && selectedKeepIndex !== undefined ? '' : 'disabled'}>${busy ? 'Keeping…' : selectedKeepIndex === undefined ? 'Choose a card to keep' : `Keep ${CARDS[game.hand[selectedKeepIndex]].name}`}</button></div>`;
-  else if (ui.phase === 'choose-target' && selectedCard !== undefined) action = `<div class="action-sheet" aria-label="Choose a player"><div class="action-step">STEP 2 OF ${selectedCard === 1 ? '3' : '2'}</div><h3>Choose a player</h3><p class="action-help">${CARDS[selectedCard].name}: ${CARD_FACE_TEXT[selectedCard]}</p>${targets.map(id => { const p = game.players.find(x => x.id === id)!; return `<button type="button" data-target="${id}"><span class="target-avatar">${p.bot ? '⚙' : esc(p.name[0])}</span><span><b>${esc(p.name)}</b><small>${p.tokens} ◆ seals</small></span><span aria-hidden="true">›</span></button>`; }).join('')}<button type="button" class="cancel">‹ Back to cards</button></div>`;
+  if (ui.phase === 'case-review') action = `<div class="action-sheet confirm" aria-label="Keep a card"><div class="action-step">CASE REVIEW</div><p>Keep one card</p><small class="action-effect">Tap the card you want in your hand. The others return unseen.</small><button type="button" id="confirm-bottom" class="primary" ${!busy && selectedKeepIndex !== undefined ? '' : 'disabled'}>${busy ? 'Keeping…' : selectedKeepIndex === undefined ? 'Choose a card to keep' : `Keep ${CARDS[game.hand[selectedKeepIndex]].name}`}</button>${selectedKeepIndex !== undefined && !busy ? '<button type="button" id="change-review" class="cancel">‹ Change card</button>' : ''}</div>`;
+  else if (ui.phase === 'choose-target' && selectedCard !== undefined) action = `<div class="action-sheet" aria-label="Choose a player"><div class="action-step">STEP 2 OF ${selectedCard === 1 ? '3' : '2'}</div><h3>${instruction}</h3><p class="action-help">${CARDS[selectedCard].name}: ${CARD_FACE_TEXT[selectedCard]}</p>${targets.map(id => { const p = game.players.find(x => x.id === id)!; const selfTarget = selectedCard === 5 && id === me.id; return `<button type="button" data-target="${id}"><span class="target-avatar">${p.bot ? '⚙' : esc(p.name[0])}</span><span class="target-copy"><b>${selfTarget ? 'You' : esc(p.name)}</b><small>${selfTarget ? heldCard === 9 ? 'Scarlet Evidence will eliminate you' : 'Discard your card and redraw' : `${p.tokens} ◆ seals`}</small></span><span aria-hidden="true">›</span></button>`; }).join('')}<button type="button" class="cancel">‹ Back to cards</button></div>`;
   else if (ui.phase === 'guess' && selectedCard !== undefined && selectedTarget) action = `<div class="action-sheet" aria-label="Choose a card guess"><div class="action-step">STEP 3 OF 3</div><h3>What card do they hold?</h3><p class="action-help">Guess ${esc(game.players.find(p => p.id === selectedTarget)?.name ?? 'their')}’s card</p><div class="guess-grid">${guesses.map(v => `<button type="button" data-guess="${v}"><b>${v}</b>${CARDS[v].name}</button>`).join('')}</div><button type="button" class="cancel">‹ Back to players</button></div>`;
-  else if (ui.phase === 'confirm' && selectedCard !== undefined) action = `<div class="action-sheet confirm" aria-label="Confirm card play"><div class="action-step">FINAL STEP</div><p>Play <b>${CARDS[selectedCard].name}</b>${selectedTarget ? ` on <b>${esc(game.players.find(p => p.id === selectedTarget)!.name)}</b>` : ''}${selectedGuess !== undefined ? `, guessing <b>${CARDS[selectedGuess].name}</b>` : ''}?</p><small class="action-effect">${CARDS[selectedCard].text}</small><small class="visibility-note"><span aria-hidden="true">◉</span>${CARD_INTEL[selectedCard].reveal}</small><button type="button" id="confirm" class="primary" ${busy ? 'disabled' : ''}>${busy ? 'Playing…' : 'Play card'}</button><button type="button" class="cancel">${selectedGuess !== undefined ? '‹ Back to guesses' : selectedTarget ? '‹ Back to players' : '‹ Back to cards'}</button></div>`;
+  else if (ui.phase === 'confirm' && selectedCard !== undefined) action = `<div class="action-sheet confirm ${selectedCard === 9 || selfEvidenceRisk ? 'danger-play' : ''}" aria-label="Confirm card play"><div class="action-step">FINAL STEP</div><p>Play <b>${CARDS[selectedCard].name}</b>${selectedTarget ? ` on <b>${esc(game.players.find(p => p.id === selectedTarget)!.name)}</b>` : ''}${selectedGuess !== undefined ? `, guessing <b>${CARDS[selectedGuess].name} (${selectedGuess})</b>` : ''}?</p><small class="action-effect">${cardPlayPreview(game, selectedCard, selectedCardIndex ?? game.hand.indexOf(selectedCard), selectedTarget)}</small><small class="visibility-note"><span aria-hidden="true">◉</span>${CARD_INTEL[selectedCard].reveal}</small><button type="button" id="confirm" class="primary" ${busy ? 'disabled' : ''}>${busy ? 'Playing…' : selectedCard === 9 ? 'Play and leave the round' : selfEvidenceRisk ? 'Discard evidence and leave round' : 'Play card'}</button><button type="button" class="cancel">${selectedGuess !== undefined ? '‹ Back to guesses' : selectedTarget ? '‹ Back to players' : '‹ Back to cards'}</button></div>`;
 
   const winningIds = game.phase === 'match-over' ? game.matchWinnerIds : game.winnerIds;
-  const winnerNames = winningIds.map(id => game.players.find(p => p.id === id)?.name).filter(Boolean).join(' & ');
+  const winnerNames = winningIds.map(id => id === me.id ? 'You' : game.players.find(p => p.id === id)?.name).filter(Boolean).join(' & ');
+  const winnerVerb = winningIds.length === 1 && winningIds[0] !== me.id ? 'wins' : 'win';
   const lastActor = game.players.find(p => p.id === game.lastAction?.actorId);
   const lastTarget = game.players.find(p => p.id === game.lastAction?.targetId);
   const botAside = lastActor?.bot ? `<em>“${['Nothing personal.', 'I had a hunch.', 'Follow the evidence.', 'That story does not add up.', 'You cannot reach me here.', 'Let us try another angle.', 'Every detail matters.', 'New face, same case.', 'A useful distraction.', 'Case closed.'][game.lastAction!.card]}”</em>` : '';
-  const actionStage = game.lastAction && lastActor ? `<section class="action-stage action-${game.lastAction.card} ${animateAction ? 'animate' : ''} ${resolvedAction ? 'result-updated' : ''}" aria-live="polite"><div class="stage-origin"><small>LAST CARD PLAYED</small><strong>${lastActor.id === me.id ? 'You' : esc(lastActor.name)}${lastTarget ? ` <span>→</span> ${lastTarget.id === me.id ? 'You' : esc(lastTarget.name)}` : ''}</strong></div><div class="featured-play">${art(game.lastAction.card, 'featured-art')}<strong>${game.lastAction.card}</strong><span><b>${CARDS[game.lastAction.card].name}</b><small>${CARD_FACE_TEXT[game.lastAction.card]}</small></span></div><p class="action-resolution">${esc(game.lastAction.resolution)}${botAside}</p></section>` : `<section class="action-stage waiting"><span class="empty-discard" aria-hidden="true">✦</span><p>Round ${game.round} is dealt.<br><small>${esc(turn?.name ?? 'The first player')} draws first.</small></p></section>`;
+  const actionStage = game.lastAction && lastActor ? `<section class="action-stage action-${game.lastAction.card} ${animateAction ? 'animate' : ''} ${resolvedAction ? 'result-updated' : ''}" aria-live="polite"><div class="stage-origin"><small>LAST CARD PLAYED</small><strong>${lastActor.id === me.id ? 'You' : esc(lastActor.name)}${lastTarget ? ` <span>→</span> ${lastTarget.id === me.id ? 'You' : esc(lastTarget.name)}` : ''}</strong></div><div class="featured-play">${art(game.lastAction.card, 'featured-art')}<i class="featured-symbol" aria-hidden="true">${CARD_SYMBOLS[game.lastAction.card]}</i><strong>${game.lastAction.card}</strong><span><b>${CARDS[game.lastAction.card].name}</b><small>${CARD_FACE_TEXT[game.lastAction.card]}</small></span></div><p class="action-resolution">${game.lastAction.guess !== undefined ? `Guessed ${CARDS[game.lastAction.guess].name} (${game.lastAction.guess}). ` : ''}${esc(game.lastAction.resolution)}${botAside}</p></section>` : `<section class="action-stage waiting"><span class="empty-discard" aria-hidden="true">✦</span><p>Round ${game.round} is dealt.<br><small>${esc(turn?.name ?? 'The first player')} draws first.</small></p></section>`;
   const publicDiscards = `<section id="public-cards" class="discard-board" aria-label="All public cards"><div class="discard-heading"><p class="eyebrow">PUBLIC CARDS</p><small>${game.players.length > 3 ? 'Swipe for more →' : 'Use these to narrow the deck'}</small></div>${game.removedCount ? `<p class="hidden-cards-note">${game.removedCount} cards were set aside facedown. Their identities are private.</p>` : ''}<div class="discard-lanes">${game.players.map(player => `<article class="discard-lane ${game.lastAction?.targetId === player.id ? 'targeted' : ''}"><b>${player.id === me.id ? 'You' : esc(player.name)}</b><div>${player.discards.length ? player.discards.map((value, index) => `<span class="discard-chip art-${value} ${game.lastAction?.actorId === player.id && index === player.discards.length - 1 ? 'latest' : ''} ${index >= (newDiscardCounts.get(player.id) ?? Infinity) ? 'new-discard' : ''}" role="img" aria-label="${CARDS[value].name}, value ${value}"><i>${value}</i><small>${CARDS[value].name}</small></span>`).join('') : '<em>None yet</em>'}</div></article>`).join('')}</div></section>`;
   const decisivePlays = game.log.filter(line => !line.startsWith('Round ')).slice(-4);
   const roundReveals = game.roundSummary?.reveals.map(reveal => { const player = game.players.find(p => p.id === reveal.playerId); return `<li><span class="reveal-card art-${reveal.card}" aria-hidden="true"><b>${reveal.card}</b></span><span><b>${player?.id === me.id ? 'You' : esc(player?.name ?? 'Player')}</b><small>${CARDS[reveal.card].name} · value ${reveal.card}</small></span></li>`; }).join('') ?? '';
@@ -221,23 +242,24 @@ function game(): string {
     const awards = game.roundSummary?.awards.filter(award => award.playerId === player.id) ?? [];
     if (!awards.length) return [];
     const reasons = awards.map(award => award.source === 'round' ? 'Round win' : 'Wiretap bonus').join(' + ');
-    return [`<li><span><b>${player.id === me.id ? 'You' : esc(player.name)}</b><small>${reasons}</small></span><strong>+${awards.length} ◆ <small>${player.tokens} / ${tokenTarget(game.players.length)} total</small></strong></li>`];
+    const progress = Array.from({ length: tokenTarget(game.players.length) }, (_, index) => `<i class="${index < player.tokens ? 'earned' : ''}" aria-hidden="true">◆</i>`).join('');
+    return [`<li><span class="award-player"><b>${player.id === me.id ? 'You' : esc(player.name)}</b><small>${reasons}</small></span><span class="award-score"><strong>+${awards.length} ◆</strong><span class="award-progress" aria-label="${player.tokens} of ${tokenTarget(game.players.length)} seals">${progress}</span></span></li>`];
   }).join('');
   const isHost = room!.players.some(player => player.id === me.id && player.host);
-  const roundTimeline = decisivePlays.length ? `<details class="round-timeline"><summary><span aria-hidden="true">▤</span> Round timeline</summary><ol>${decisivePlays.map(line => `<li>${esc(line)}</li>`).join('')}</ol></details>` : '';
+  const roundTimeline = decisivePlays.length ? `<details class="round-timeline"><summary><span aria-hidden="true">▤</span><b>Round timeline</b><small>${decisivePlays.length} events</small><span class="timeline-chevron" aria-hidden="true">⌄</span></summary><ol>${decisivePlays.map((line, index) => `<li><span class="timeline-number" aria-hidden="true">${index + 1}</span><span>${esc(line)}</span></li>`).join('')}</ol></details>` : '';
   const resultActions = game.phase === 'round-over'
     ? isHost ? `<button type="button" id="next-round" class="primary replay-button" ${busy ? 'disabled' : ''}>↻ Deal next round</button>` : '<p class="result-wait">Waiting for the host to deal…</p>'
     : isHost ? `<div class="result-controls"><button type="button" id="rematch" class="primary replay-button" ${busy ? 'disabled' : ''}>↻ Play again</button><button type="button" id="finish-home" class="secondary">Leave table</button></div>`
       : '<div class="result-controls"><p class="result-wait">Waiting for the host to play again…</p><button type="button" id="finish-home" class="secondary">Leave table</button></div>';
-  const roundOverlay = game.phase !== 'playing' ? `<section class="result case-summary round-summary" aria-labelledby="result-title"><div class="seal-stamp" aria-hidden="true"><span>${game.phase === 'match-over' ? 'CASE' : 'ROUND'}</span><b>CLOSED</b></div><p class="eyebrow">${game.phase === 'match-over' ? 'CASE CLOSED' : `ROUND ${game.round} COMPLETE`}</p><h2 id="result-title">${esc(winnerNames || 'A rival')} ${winningIds.length > 1 ? 'win' : 'wins'}!</h2>${awardRows ? `<section class="round-awards"><h3>Seals earned</h3><ul>${awardRows}</ul></section>` : ''}${resultActions}${game.roundSummary ? `<section class="round-reason"><h3>Why the round ended</h3><p>${esc(game.roundSummary.reason)}</p>${roundReveals ? `<ul>${roundReveals}</ul>` : ''}</section>` : ''}${roundTimeline}</section>` : '';
+  const roundOverlay = game.phase !== 'playing' ? `<section class="result case-summary round-summary" aria-labelledby="result-title"><div class="result-heading"><div class="seal-stamp" aria-hidden="true"><span>${game.phase === 'match-over' ? 'CASE' : 'ROUND'}</span><b>CLOSED</b></div><div><p class="eyebrow">${game.phase === 'match-over' ? 'CASE CLOSED' : `ROUND ${game.round} COMPLETE`}</p><h2 id="result-title">${esc(winnerNames || 'A rival')} ${winnerVerb}!</h2></div></div><div class="result-details">${awardRows ? `<section class="round-awards"><h3>Seals earned</h3><ul>${awardRows}</ul></section>` : ''}${game.roundSummary ? `<section class="round-reason"><h3>Why the round ended</h3><p>${esc(game.roundSummary.reason)}</p>${roundReveals ? `<ul>${roundReveals}</ul>` : ''}</section>` : ''}</div><div class="result-footer">${resultActions}${roundTimeline}</div></section>` : '';
   const reaction = room!.reaction && visibleReactionSequence === room!.reaction.sequence ? room!.reaction : undefined;
   const reactionPlayer = reaction ? room!.players.find(player => player.id === reaction.playerId) : undefined;
   const aliveCount = game.players.filter(p => !p.eliminated).length;
-  return `<main class="table"><header class="table-header"><span class="table-brand">${logo('mini-crest')}<b>Scarlet Seal</b><small>ROUND ${game.round}</small></span><nav aria-label="Game navigation">${leaveButton()}${rulesButton('Rules')}</nav><span class="deck-count">DRAW PILE <b>${game.deckCount}</b></span></header>
+  return `<main class="table"><header class="table-header"><span class="table-brand">${logo('mini-crest')}<b>Scarlet Seal</b><small>ROUND ${game.round}</small></span><nav aria-label="Game navigation">${leaveButton()}${rulesButton('Rules')}<button type="button" id="sound-toggle" class="sound-toggle" aria-label="${soundEnabled ? 'Mute turn sound' : 'Enable turn sound'}" aria-pressed="${soundEnabled}" title="${soundEnabled ? 'Turn sound on' : 'Turn sound off'}"><span aria-hidden="true">♫</span></button></nav><span class="deck-count">DRAW PILE <b>${game.deckCount}</b></span></header>
     ${roundOverlay}
     <section class="game-felt ${roundStarted ? 'round-enter' : ''}" aria-label="Game table"><section class="table-seats" aria-label="Players in turn order"><div class="table-section-heading"><span>INVESTIGATORS <b>${aliveCount} / ${game.players.length} IN</b></span><small>First to ${tokenTarget(game.players.length)} seals</small></div><div class="opponents">${game.players.map((p, index) => { const isMe = p.id === me.id; const targeted = game.lastAction?.targetId === p.id; const hasTurn = game.turnPlayerId === p.id && game.phase === 'playing'; return `<div data-player-id="${p.id}" class="opponent ${isMe ? 'your-seat' : ''} ${p.eliminated ? 'out' : 'alive'} ${targeted ? 'targeted' : ''} ${hasTurn ? 'current-turn' : ''} ${hasTurn && turnChanged ? 'turn-enter' : ''} ${newlyOut.has(p.id) ? 'just-out' : ''} ${newlyProtected.has(p.id) ? 'just-shielded' : ''}"><div class="seat-top"><span class="seat-order">${index + 1}</span><b>${isMe ? 'You' : esc(p.name)}</b><span class="seat-score ${earnedSeals.has(p.id) ? 'seal-earned' : ''}">${p.tokens} ◆</span></div><div class="seat-bottom"><span class="opponent-card ${p.handCount > 1 ? 'two-cards' : ''}" aria-label="${isMe ? 'Your hand is below' : `${p.handCount} hidden card${p.handCount === 1 ? '' : 's'}`}">${p.eliminated ? '✕' : isMe ? '↓' : '?'}</span><span class="seat-state"><strong>${p.eliminated ? 'OUT' : hasTurn ? (isMe ? 'YOUR TURN' : 'PLAYING') : 'IN'}</strong>${p.protected ? '<small>Shielded</small>' : isMe ? '<small>Your hand below</small>' : `<small>${p.handCount} card${p.handCount === 1 ? '' : 's'}</small>`}</span></div></div>`; }).join('')}</div></section><div class="board-center">${actionStage}</div>${publicDiscards}</section>
-    ${game.phase === 'playing' ? `<section class="decision-zone"><section class="turn-banner ${myTurn ? 'active' : ''} ${turnChanged ? 'turn-enter' : ''}" aria-live="polite"><span class="turn-dot" aria-hidden="true"></span><div><small>${turnStep}</small><p>${instruction}</p>${firstRoundTip}</div><span class="turn-next">${nextPlayer ? `NEXT <b>${nextPlayer.id === me.id ? 'YOU' : esc(nextPlayer.name)}</b>` : ''}</span></section>${ownReceipt}${game.notice ? `<p class="turn-notice"><b>Private clue</b>${esc(game.notice)}</p>` : ''}<section class="play-area"><section class="hand"><div class="hand-heading"><p class="eyebrow">${choosingBottom ? 'CHOOSE ONE TO KEEP' : game.hand.length > 1 ? 'YOUR TWO CARDS' : 'YOUR CARD'}</p><span>${choosingBottom ? selectedKeepIndex === undefined ? 'Tap your favourite' : 'Tap another to change' : myTurn ? 'Choose one to play' : 'Only you can see this'}</span></div><div class="cards ${choosingBottom ? 'review-cards' : ''}">${game.hand.map((v, index) => card(v, index, !busy && (choosingBottom || myTurn && playable.has(v)), forcedCard === v, choosingBottom, myTurn && !choosingBottom && !playable.has(v) ? (forcedCard !== undefined ? 'Red Herring must be played' : 'Unavailable now') : '')).join('')}</div></section>${action ? `<div id="turn-action">${action}</div>` : ''}</section></section>` : ''}
-    <details class="reactions"><summary><span aria-hidden="true">☺</span> React <span aria-hidden="true">⌄</span></summary><nav aria-label="Table reactions"><button type="button" data-reaction="Suspicious"><span aria-hidden="true">👀</span><small>Suspicious</small></button><button type="button" data-reaction="Nice try"><span aria-hidden="true">✨</span><small>Nice try</small></button><button type="button" data-reaction="Case closed"><span aria-hidden="true">✅</span><small>Case closed</small></button></nav></details><details class="case-feed" aria-label="Recent public plays"><summary>Case notes <span>${game.publicActions.length} plays</span></summary><ol>${game.publicActions.slice(-5).reverse().map(event => { const actor = game.players.find(p => p.id === event.actorId); const target = game.players.find(p => p.id === event.targetId); return `<li><span class="play-value">${event.card}</span><span><b>${actor?.id === me.id ? 'You' : esc(actor?.name ?? 'Player')} played ${CARDS[event.card].name}${target ? ` on ${target.id === me.id ? 'you' : esc(target.name)}` : ''}</b><small>${esc(event.resolution)}</small></span></li>`; }).join('')}</ol></details>
+    ${game.phase === 'playing' ? `<section class="decision-zone"><section class="turn-banner ${myTurn ? 'active' : ''} ${turnChanged ? 'turn-enter' : ''} ${turnCue ? 'turn-call' : ''}" aria-live="polite"><span class="turn-dot" aria-hidden="true"></span><div><small>${turnStep}</small><p>${instruction}</p>${turnCue ? '<span class="turn-alert" aria-hidden="true">✦ YOUR TURN</span>' : ''}${firstRoundTip}</div><span class="turn-next">${nextPlayer ? `NEXT <b>${nextPlayer.id === me.id ? 'YOU' : esc(nextPlayer.name)}</b>` : ''}</span></section>${ownReceipt}${game.notice && !choosingBottom ? privateClue(game.notice) : ''}<section class="play-area"><section class="hand"><div class="hand-heading"><p class="eyebrow">${choosingBottom ? 'CHOOSE ONE TO KEEP' : game.hand.length > 1 ? 'YOUR TWO CARDS' : 'YOUR CARD'}</p><span>${choosingBottom ? selectedKeepIndex === undefined ? 'Tap your favourite' : 'Tap another to change' : myTurn ? 'Choose one to play' : 'Only you can see this'}</span></div><div class="cards ${choosingBottom ? 'review-cards' : ''}">${game.hand.map((v, index) => card(v, index, !busy && (choosingBottom || myTurn && playable.has(v)), forcedCard === v, choosingBottom, myTurn && !choosingBottom && !playable.has(v) ? (forcedCard !== undefined ? 'Red Herring must be played' : 'Unavailable now') : '')).join('')}</div></section>${action ? `<div id="turn-action">${action}</div>` : ''}</section></section>` : ''}
+    ${game.phase !== 'playing' ? '<div class="result-side">' : ''}<details class="reactions"><summary><span aria-hidden="true">☺</span> React <span aria-hidden="true">⌄</span></summary><nav aria-label="Table reactions"><button type="button" data-reaction="Suspicious"><span aria-hidden="true">👀</span><small>Suspicious</small></button><button type="button" data-reaction="Nice try"><span aria-hidden="true">✨</span><small>Nice try</small></button><button type="button" data-reaction="Case closed"><span aria-hidden="true">✅</span><small>Case closed</small></button></nav></details><details class="case-feed" aria-label="Recent public plays"><summary>Case notes <span>${game.publicActions.length} plays</span></summary><ol>${game.publicActions.slice(-5).reverse().map(event => { const actor = game.players.find(p => p.id === event.actorId); const target = game.players.find(p => p.id === event.targetId); return `<li><span class="play-value">${event.card}</span><span><b>${actor?.id === me.id ? 'You' : esc(actor?.name ?? 'Player')} played ${CARDS[event.card].name}${target ? ` on ${target.id === me.id ? 'you' : esc(target.name)}` : ''}${event.guess !== undefined ? `, guessing ${CARDS[event.guess].name}` : ''}</b><small>${esc(event.resolution)}</small></span></li>`; }).join('')}</ol></details>${game.phase !== 'playing' ? '</div>' : ''}
     ${reaction && reactionPlayer ? `<div class="reaction-pop" role="status"><b>${reactionPlayer.id === me.id ? 'You' : esc(reactionPlayer.name)}</b><span>${reaction.text}</span></div>` : ''}${error ? `<p class="error">${esc(error)}</p>` : ''}</main>${rulesSheet()}${leaveSheet()}`;
 }
 
@@ -282,6 +304,7 @@ function render(): void {
   playOrigin = undefined;
   drawOrigin = undefined;
   turnChanged = false;
+  turnCue = false;
   roundStarted = false;
   resolvedAction = false;
   newDiscardCounts = new Map();
@@ -315,6 +338,11 @@ const revealTurnAction = () => requestAnimationFrame(() => {
 });
 
 function bind(): void {
+  document.querySelector('#sound-toggle')?.addEventListener('click', () => {
+    soundEnabled = !soundEnabled;
+    localStorage.setItem('scarlet-seal-sound', soundEnabled ? 'on' : 'off');
+    render();
+  });
   document.querySelector('#hide-tips')?.addEventListener('click', () => { showFirstRoundTips = false; localStorage.setItem('scarlet-seal-tips-complete', 'yes'); render(); document.querySelector<HTMLElement>('.hand .card.playable, [data-open-rules]')?.focus(); });
   document.querySelectorAll('[data-open-rules]').forEach(el => el.addEventListener('click', () => { rulesOpen = true; render(); requestAnimationFrame(() => document.querySelector<HTMLElement>('#close-rules')?.focus()); }));
   document.querySelector('#close-rules')?.addEventListener('click', () => { rulesOpen = false; render(); });
@@ -346,23 +374,42 @@ function bind(): void {
   document.querySelector('#confirm-leave')?.addEventListener('click', returnHome);
   document.querySelectorAll<HTMLElement>('[data-card]').forEach(el => el.addEventListener('click', () => {
     const value = Number(el.dataset.card) as CardValue;
-    selectedCard = value; selectedCardIndex = Number(el.dataset.cardIndex); selectedTarget = undefined; selectedGuess = undefined; render(); revealTurnAction();
+    selectedCard = value; selectedCardIndex = Number(el.dataset.cardIndex); selectedTarget = undefined; selectedGuess = undefined;
+    const direct = room?.game?.legalMoves.find(move => move.card === value && move.targetId === undefined && move.guess === undefined);
+    if (direct && !needsPlayConfirmation(room!.game!, direct, selectedCardIndex)) { play(direct); return; }
+    render(); revealTurnAction();
   }));
   document.querySelectorAll<HTMLElement>('[data-bottom-index]').forEach(el => el.addEventListener('click', () => {
     const index = Number(el.dataset.bottomIndex);
     selectedKeepIndex = selectedKeepIndex === index ? undefined : index;
     render();
-    requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-bottom-index="${index}"]`)?.focus({ preventScroll: true }));
+    if (selectedKeepIndex !== undefined) revealTurnAction();
+    else requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-bottom-index="${index}"]`)?.focus({ preventScroll: true }));
   }));
-  document.querySelectorAll<HTMLElement>('[data-target]').forEach(el => el.addEventListener('click', () => { selectedTarget = el.dataset.target; selectedGuess = undefined; render(); revealTurnAction(); }));
-  document.querySelectorAll<HTMLElement>('[data-guess]').forEach(el => el.addEventListener('click', () => { selectedGuess = Number(el.dataset.guess) as CardValue; render(); revealTurnAction(); }));
+  document.querySelectorAll<HTMLElement>('[data-target]').forEach(el => el.addEventListener('click', () => {
+    selectedTarget = el.dataset.target; selectedGuess = undefined;
+    const move = room?.game?.legalMoves.find(candidate => candidate.card === selectedCard && candidate.targetId === selectedTarget && candidate.guess === undefined);
+    if (move && selectedCardIndex !== undefined && !needsPlayConfirmation(room!.game!, move, selectedCardIndex)) { play(move); return; }
+    render(); revealTurnAction();
+  }));
+  document.querySelectorAll<HTMLElement>('[data-guess]').forEach(el => el.addEventListener('click', () => {
+    selectedGuess = Number(el.dataset.guess) as CardValue;
+    const move = room?.game?.legalMoves.find(candidate => candidate.card === selectedCard && candidate.targetId === selectedTarget && candidate.guess === selectedGuess);
+    if (move) { play(move); return; }
+    render(); revealTurnAction();
+  }));
   document.querySelector('#confirm')?.addEventListener('click', () => play({ card: selectedCard!, targetId: selectedTarget, guess: selectedGuess }));
   document.querySelector('#confirm-bottom')?.addEventListener('click', () => {
     if (selectedKeepIndex === undefined) return;
     const returned = room!.game!.hand.filter((_, index) => index !== selectedKeepIndex);
     emit(cb => socket.emit('game:return-cards', returned, cb));
   });
-  document.querySelectorAll('.cancel').forEach(el => el.addEventListener('click', backChoice));
+  document.querySelector('#change-review')?.addEventListener('click', () => requestAnimationFrame(() => {
+    const choice = document.querySelector<HTMLElement>(`[data-bottom-index="${selectedKeepIndex}"]`);
+    choice?.scrollIntoView({ block: 'center', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    choice?.focus({ preventScroll: true });
+  }));
+  document.querySelectorAll('#turn-action .cancel:not(#change-review)').forEach(el => el.addEventListener('click', backChoice));
 }
 function backChoice(): void {
   if (selectedGuess !== undefined) selectedGuess = undefined;

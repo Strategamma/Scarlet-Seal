@@ -46,6 +46,7 @@ test('Wiretap has no immediate effect and finishes the turn normally', () => {
   assert.deepEqual(state.players[0].hand, [4]);
   assert.deepEqual(state.players[0].discards, [0]);
   assert.equal(state.turnIndex, 1);
+  assert.match(state.lastAction?.resolution ?? '', /bonus seal is possible/);
 });
 
 test('Lead reveals privately before an empty deck ends the round', () => {
@@ -71,7 +72,7 @@ test('Hunch can identify the zero-value Wiretap', () => {
   assert.equal(state.players[1].eliminated, true);
   assert.equal(state.phase, 'round-over');
   assert.match(state.log[1], /Ada played Hunch on Bea/);
-  assert.deepEqual(state.lastAction, { sequence: 1, actorId: 'a', card: 1, targetId: 'b', resolution: 'Correct: Bea was eliminated.' });
+  assert.deepEqual(state.lastAction, { sequence: 1, actorId: 'a', card: 1, targetId: 'b', guess: 0, resolution: 'Correct: Bea was eliminated.' });
   assert.equal(state.roundSummary?.reason, 'Ada was the last investigator still in the case.');
   assert.deepEqual(state.roundSummary?.reveals, [{ playerId: 'a', card: 4 }]);
 });
@@ -106,6 +107,26 @@ test('Safehouse removes protected players from target choices', () => {
   assert.deepEqual(legalMoves(state, 'a').filter(move => move.card === 1), [{ card: 1 }]);
 });
 
+test('Hunch publishes the named card while a private Lead clue stays private', () => {
+  const hunch = game(); setTurn(hunch, [1, 4], 2);
+  playCard(hunch, 'a', { card: 1, targetId: 'b', guess: 0 }, () => 0);
+  assert.equal(viewFor(hunch, 'b').lastAction?.guess, 0);
+  assert.equal(viewFor(hunch, 'b').publicActions.at(-1)?.guess, 0);
+
+  const lead = game(); setTurn(lead, [2, 4], 7);
+  playCard(lead, 'a', { card: 2, targetId: 'b' }, () => 0);
+  assert.match(viewFor(lead, 'a').notice ?? '', /Disguise/);
+  assert.equal(viewFor(lead, 'b').notice, undefined);
+  assert.equal(viewFor(lead, 'b').lastAction?.guess, undefined);
+});
+
+test('cards without available targets explain why their effect was skipped', () => {
+  const state = game(); setTurn(state, [2, 4], 3);
+  state.players[1].protected = true;
+  playCard(state, 'a', { card: 2 }, () => 0);
+  assert.match(state.lastAction?.resolution ?? '', /No rival could be targeted/);
+});
+
 test('Safehouse protection starts immediately and expires before the next draw', () => {
   const state = game(); setTurn(state, [4, 2], 4);
   state.deck = [1, 2, 3, 5];
@@ -133,6 +154,7 @@ test('Case Review pauses for a private choice and returns cards to the bottom', 
   playCard(state, 'a', { card: 6 }, () => 0);
   assert.deepEqual(state.players[0].hand, [9, 3, 2]);
   assert.deepEqual(state.pendingBottom, { playerId: 'a', count: 2 });
+  assert.match(viewFor(state, 'a').notice ?? '', /Choose one card to keep/);
   assert.equal(legalMoves(state, 'a').length, 0);
   returnCardsToBottom(state, 'a', [2, 3], () => 0);
   assert.deepEqual(state.players[0].hand, [9]);
@@ -153,6 +175,7 @@ test('Red Herring resolves with no effect and Scarlet Evidence eliminates immedi
   playCard(redHerring, 'a', { card: 8 }, () => 0);
   assert.deepEqual(redHerring.players[0].hand, [2]);
   assert.equal(redHerring.turnIndex, 1);
+  assert.match(redHerring.lastAction?.resolution ?? '', /no immediate effect/);
 
   const evidence = game(); setTurn(evidence, [9, 4], 2);
   playCard(evidence, 'a', { card: 9 }, () => 0);

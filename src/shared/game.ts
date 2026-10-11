@@ -21,7 +21,7 @@ export interface Player {
   id: string; name: string; hand: CardValue[]; discards: CardValue[];
   tokens: number; protected: boolean; eliminated: boolean; connected: boolean; bot: boolean;
 }
-export interface PublicAction { sequence: number; actorId: string; card: CardValue; targetId?: string; resolution: string }
+export interface PublicAction { sequence: number; actorId: string; card: CardValue; targetId?: string; guess?: CardValue; resolution: string }
 export interface GameState {
   phase: 'lobby' | 'playing' | 'round-over' | 'match-over';
   players: Player[]; deck: CardValue[]; setAside?: CardValue; faceUpRemoved: CardValue[];
@@ -136,7 +136,7 @@ export function playCard(state: GameState, playerId: string, move: Move, rng = M
   const index = actor.hand.indexOf(move.card);
   actor.hand.splice(index, 1); actor.discards.push(move.card);
   const target = move.targetId ? state.players.find(p => p.id === move.targetId) : undefined;
-  state.lastAction = { sequence: ++state.actionSequence, actorId: actor.id, card: move.card, targetId: target?.id, resolution: 'No immediate effect.' };
+  state.lastAction = { sequence: ++state.actionSequence, actorId: actor.id, card: move.card, targetId: target?.id, guess: move.card === 1 ? move.guess : undefined, resolution: 'No immediate effect.' };
   const action = state.lastAction;
   state.publicActions.push(action);
   state.log.push(`${actor.name} played ${CARDS[move.card].name}${target ? ` on ${target.name}` : ''}.`);
@@ -145,6 +145,10 @@ export function playCard(state: GameState, playerId: string, move: Move, rng = M
     state.log.push(`${actor.name} named ${CARDS[move.guess].name} for ${target.name}.`);
     if (target.hand[0] === move.guess) { eliminate(state, target, 'the Hunch was correct'); action.resolution = `Correct: ${target.name} was eliminated.`; }
     else action.resolution = `Incorrect: ${target.name} stayed in the case.`;
+  } else if (move.card === 0) {
+    action.resolution = `${actor.name} recorded a Wiretap; a bonus seal is possible at round end.`;
+  } else if ([1, 2, 3, 7].includes(move.card) && !target) {
+    action.resolution = 'No rival could be targeted; this card had no effect.';
   } else if (move.card === 2 && target) {
     state.privateNotice[actor.id] = `${target.name} holds ${CARDS[target.hand[0]].name}.`;
     action.resolution = `${actor.name} privately inspected ${target.name}'s hand.`;
@@ -172,13 +176,16 @@ export function playCard(state: GameState, playerId: string, move: Move, rng = M
     while (drawn < 2 && state.deck.length) { actor.hand.push(state.deck.pop()!); drawn++; }
     if (drawn) {
       state.pendingBottom = { playerId: actor.id, count: drawn };
-      state.privateNotice[actor.id] = `Choose ${drawn} card${drawn === 1 ? '' : 's'} to return to the bottom of the deck.`;
+      state.privateNotice[actor.id] = `Choose one card to keep. The other ${drawn} card${drawn === 1 ? '' : 's'} return unseen.`;
       action.resolution = `${actor.name} is reviewing ${drawn + 1} cards.`;
       return;
     }
+    action.resolution = 'The deck was empty; there were no extra cards to review.';
   } else if (move.card === 7 && target) {
     [actor.hand, target.hand] = [target.hand, actor.hand];
     action.resolution = `${actor.name} and ${target.name} traded hands.`;
+  } else if (move.card === 8) {
+    action.resolution = 'Red Herring was discarded with no immediate effect.';
   } else if (move.card === 9) { eliminate(state, actor, 'Scarlet Evidence was played'); action.resolution = `${actor.name} exposed Scarlet Evidence and was eliminated.`; }
 
   finishTurn(state, rng);
