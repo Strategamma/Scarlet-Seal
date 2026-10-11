@@ -1,13 +1,13 @@
 # UI/UX Vision
 
-Scarlet Seal should feel like a focused detective card table, not a dashboard. On every screen, one action owns the visual hierarchy.
+Scarlet Seal belongs to Decadence Inc.: dark grid, coral/scarlet, amber, bold sans, playful motion. Artwork is optional; the value, name, and effect must read at a glance.
 
-- Lobby: room identity, seated players, and the start action. Rules/tutorial material stays behind the Rules sheet.
-- Game: current turn prompt first, playable hand second, compact opponent and last-play status third.
-- Public discards stay visible on the board; recent history lives in a native, keyboard-accessible “Case notes” disclosure.
-- Cards preserve character art and readable ability copy without dominating the full viewport.
-- Use warm paper, scarlet, oxblood, and antique gold with fewer borders and boxed panels. Reserve strong shadows and motion for playable cards and state changes.
-- Mobile is canonical. At 320–520px, no content may overlap; two normal hand cards must fit side by side, and essential actions must remain reachable by ordinary scrolling.
-- Desktop uses two columns: shared board on the left, personal decisions and secondary controls on the right.
-- Animate state changes once: cards travel from deck or player to their destination; new discards, turns, choices, and seals get brief feedback. Idle pieces remain still and reduced-motion removes travel.
-- All non-card controls meet a 44px touch target on mobile. Modal sheets trap keyboard focus, icon-only controls have accessible names, and information exposed through hover titles is also visible or announced without hover.
+- One primary action per phase: choose card, choose player, name card, confirm, resolve, round result. Current and next player remain visible.
+- First-round help sits inside the turn prompt, never covers controls, and disappears after completion or dismissal.
+- Results put replay beside the reward. Optional timeline detail stays collapsed. Targets, guesses, and reactions use large labeled touch controls instead of stacked explanations.
+- Back moves one step through a decision; leaving a room requires confirmation. Rules stay available during play.
+- Board shows seats, alive/out state, seal scores, draw pile, last card with actor/target/result, and public discards. Recent public plays are in Case notes.
+- Icons support short text labels. An unfamiliar symbol never carries a rule alone.
+- Animate actual state changes once: draw, play, discard, handoff, elimination, protection, and seal. Respect reduced motion.
+- Mobile at 320–520px must avoid overlap and keep two hand cards legible; desktop separates shared board and personal choices. Non-card controls need 44px touch targets.
+- Newcomer testing is the quality gate: observe people starting, taking turns, reading outcomes, using back/leave, and explaining how they won without help.

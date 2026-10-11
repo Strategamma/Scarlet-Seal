@@ -1,7 +1,7 @@
 # Plan
 
-- Goal: make movement explain each play, turn change, and reward.
-- Scope: draw, play, discard, turn handoff, choices, and seal awards in the existing UI; preserve rules and accessibility.
-- Approach: derive animation triggers from authoritative state changes, move the played card from its source seat or hand to the discard stage, and use short entrance animations for related feedback.
-- Risks: rapid bot updates, repeated room renders, and reduced-motion preferences; browser access was denied in this environment.
-- Verification: TypeScript/build, tests, source inspection of state transitions, and live motion QA when browser access is available.
+- Goal: make finished matches easy to replay and reduce touch-screen UI clutter.
+- Scope: same-room rematch, match result actions, turn decision panels, reactions, and first-round guidance.
+- Approach: restart a fresh authoritative game with connected seats; keep one prominent action at a time, fold optional details, and use large labeled icon controls.
+- Risks: disconnected seats during rematch, stale bot timers, narrow-screen targets, and unverified visual layout without browser access.
+- Verification: service and rules tests for rematch authorization/reset, production build, diff check, and responsive playtest when browser access is available.

@@ -53,3 +53,18 @@ test('new rounds deal without treating old discards as fresh', () => {
   assert.equal(cues.newDiscardCounts.size, 0);
   assert.equal(cues.turnChanged, false);
 });
+
+test('room presence and reactions do not erase an in-progress choice', () => {
+  const before = state();
+  before.turnPlayerId = 'a';
+  before.hand = [1, 3];
+  before.legalMoves = [{ card: 1, targetId: 'b', guess: 2 }, { card: 3, targetId: 'b' }];
+  const after = structuredClone(before);
+  after.players[1].connected = false;
+  assert.equal(gameEvents(before, after, 'a').selectionInvalidated, false);
+  after.legalMoves = [{ card: 3, targetId: 'b' }];
+  assert.equal(gameEvents(before, after, 'a').selectionInvalidated, true);
+  after.legalMoves = before.legalMoves;
+  after.hand = [1, 4];
+  assert.equal(gameEvents(before, after, 'a').selectionInvalidated, true);
+});

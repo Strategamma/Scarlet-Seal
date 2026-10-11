@@ -19,6 +19,7 @@ export interface ClientToServerEvents {
   'game:play': (move: Move, callback: (result: Result<true>) => void) => void;
   'game:return-cards': (cards: CardValue[], callback: (result: Result<true>) => void) => void;
   'game:next-round': (callback: (result: Result<true>) => void) => void;
+  'game:rematch': (callback: (result: Result<true>) => void) => void;
 }
 export interface ServerToClientEvents { 'room:state': (state: RoomView) => void; 'session': (session: Session) => void }
 export type Result<T> = { ok: true; value: T } | { ok: false; error: string };

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { RoomService } from './rooms.js';
+import type { GameState } from '../shared/game.js';
 
 function setup() {
   const states: Parameters<ConstructorParameters<typeof RoomService>[0]>[2][] = [];
@@ -65,4 +66,39 @@ test('reactions are bounded and visible to the room', () => {
   service.react(session, 'Suspicious');
   assert.deepEqual(service.state(session).reaction, { sequence: 1, playerId: session.playerId, text: 'Suspicious' });
   assert.throws(() => service.react(session, 'Nope' as 'Suspicious'), /not available/i);
+});
+
+test('a host can replay with the same connected seats and fresh scores', () => {
+  const { service, session } = setup();
+  const guestSocket = { id: `guest-${Math.random()}`, join: () => undefined } as unknown as Parameters<RoomService['join']>[0];
+  const guest = service.join(guestSocket, session.roomCode, 'Guest');
+  service.start(session);
+  assert.throws(() => service.start(session), /already started/i);
+  assert.throws(() => service.rematch(session), /finish the match/i);
+  const room = (service as unknown as { get(code: string): { game: GameState } }).get(session.roomCode);
+  room.game.phase = 'match-over';
+  room.game.players[0].tokens = 3;
+  assert.throws(() => service.rematch(guest), /only the host/i);
+  service.rematch(session);
+  const replay = service.state(session);
+  assert.equal(replay.code, session.roomCode);
+  assert.deepEqual(replay.players.map(player => player.id), [session.playerId, guest.playerId]);
+  assert.equal(replay.game?.phase, 'playing');
+  assert.equal(replay.game?.round, 1);
+  assert.deepEqual(replay.game?.players.map(player => player.tokens), [0, 0]);
+});
+
+test('a rematch replaces departed people with a bot when one player remains', () => {
+  const { service, session } = setup();
+  const guestSocket = { id: `guest-${Math.random()}`, join: () => undefined } as unknown as Parameters<RoomService['join']>[0];
+  const guest = service.join(guestSocket, session.roomCode, 'Guest');
+  service.start(session);
+  service.disconnect(guestSocket.id);
+  const room = (service as unknown as { get(code: string): { game: GameState } }).get(session.roomCode);
+  room.game.phase = 'match-over';
+  service.rematch(session);
+  const replay = service.state(session);
+  assert.equal(replay.players.length, 2);
+  assert.equal(replay.players[1].bot, true);
+  assert.throws(() => service.state(guest), /session is no longer valid/i);
 });

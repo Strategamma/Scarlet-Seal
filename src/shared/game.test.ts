@@ -56,6 +56,7 @@ test('Lead reveals privately before an empty deck ends the round', () => {
   assert.equal(state.phase, 'round-over');
   assert.match(state.roundSummary?.reason ?? '', /deck ran out.*Ada held Safehouse \(4\).*Bea held Scarlet Evidence \(9\)/);
   assert.deepEqual(state.roundSummary?.reveals, [{ playerId: 'a', card: 4 }, { playerId: 'b', card: 9 }]);
+  assert.deepEqual(state.roundSummary?.awards, [{ playerId: 'b', source: 'round' }]);
 });
 
 test('Red Herring is forced with Interrogation or Disguise', () => {
@@ -165,6 +166,7 @@ test('a sole surviving Wiretap user gains bonus evidence as well as a round toke
   state.deck = [];
   playCard(state, 'a', { card: 4 }, () => 0);
   assert.equal(state.players[0].tokens, 2);
+  assert.deepEqual(state.roundSummary?.awards, [{ playerId: 'a', source: 'round' }, { playerId: 'a', source: 'wiretap' }]);
   assert.match(state.log.at(-1)!, /Wiretap/);
 });
 

@@ -304,57 +304,6 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
   .action-stage.animate .featured-play, .table .card.playable { animation: none!important; }
 }
 
-/* This repository keeps choices and results in the page instead of modal sheets. */
-.table .action-sheet {
-  position: static;
-  left: auto;
-  bottom: auto;
-  transform: none;
-  max-height: none;
-  overflow: visible;
-}
-.table .round-summary {
-  width: 100%;
-  max-height: none;
-  overflow: visible;
-}
-.table .reactions {
-  display: block;
-  margin: 0;
-  overflow: visible;
-  border: 1px solid #9b8f70;
-  border-radius: 10px;
-  background: #102a2dcc;
-  color: #f1ddb9;
-}
-.table .reactions summary {
-  display: flex;
-  min-height: 48px;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 15px;
-  cursor: pointer;
-  font-size: .8rem;
-  font-weight: 800;
-  list-style: none;
-}
-.table .reactions summary::-webkit-details-marker { display: none; }
-.table .reactions summary span { color: #dfbd7e; font-size: 1.2rem; }
-.table .reactions nav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 0 10px 10px; }
-.table .reactions button {
-  min-width: 0;
-  min-height: 48px;
-  padding: 8px;
-  border: 1px solid #bba16e;
-  border-radius: 9px;
-  background: #e7d6b5;
-  color: #63283c;
-  font-size: .75rem;
-  line-height: 1.2;
-  white-space: normal;
-}
-.table .case-feed li { color: #452d33; font-size: .7rem; }
-.table .hidden-cards-note { color: #d9dbc8; }
 
 /* Keep the whole six-seat table readable without clipping the play receipt. */
 .table, .game-felt, .table-seats, .board-center, .table .discard-board { min-width: 0; max-width: 100%; }
@@ -497,4 +446,154 @@ button:focus-visible, a:focus-visible, summary:focus-visible {
   .table .case-feed[open] ol, .table .reactions[open] nav,
   .table .game-felt.round-enter, .table .game-felt.round-enter .opponent { animation: none!important; }
   .table .card.playable, .table .reactions button, .table .action-sheet button { transition: none!important; }
+}
+
+
+/* This repository keeps choices and results in the page instead of modal sheets. */
+.table .action-sheet {
+  position: static;
+  left: auto;
+  bottom: auto;
+  transform: none;
+  max-height: none;
+  overflow: visible;
+}
+.table .round-summary {
+  width: 100%;
+  max-height: none;
+  overflow: visible;
+}
+.table .reactions {
+  display: block;
+  margin: 0;
+  overflow: visible;
+  border: 1px solid #9b8f70;
+  border-radius: 10px;
+  background: #102a2dcc;
+  color: #f1ddb9;
+}
+.table .reactions summary {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 15px;
+  cursor: pointer;
+  font-size: .8rem;
+  font-weight: 800;
+  list-style: none;
+}
+.table .reactions summary::-webkit-details-marker { display: none; }
+.table .reactions summary span { color: #dfbd7e; font-size: 1.2rem; }
+.table .reactions nav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 0 10px 10px; }
+.table .reactions button {
+  min-width: 0;
+  min-height: 48px;
+  padding: 8px;
+  border: 1px solid #bba16e;
+  border-radius: 9px;
+  background: #e7d6b5;
+  color: #63283c;
+  font-size: .75rem;
+  line-height: 1.2;
+  white-space: normal;
+}
+.table .case-feed li { color: #452d33; font-size: .7rem; }
+.table .hidden-cards-note { color: #d9dbc8; }
+
+/* Decadence Inc. arcade treatment: the card's value and action lead. */
+body { background-color: #120d0f; background-image: linear-gradient(#ffffff08 1px,transparent 1px),linear-gradient(90deg,#ffffff08 1px,transparent 1px),radial-gradient(circle at 82% 9%,#6c2028 0,transparent 42%); background-size: 64px 64px,64px 64px,auto; }
+.table, .table button, .table summary { font-family: Inter, system-ui, sans-serif; }
+.game-felt { border-color: #9f443d; background: radial-gradient(circle at 85% 0,#4a1d27,#211418 60%,#160f12); box-shadow: 0 24px 50px #0009; }
+.game-felt:before { border-color: #e0a43f44; }
+.table .opponent { background: #1b1519e8; border-color: #886366; }
+.table .opponent.your-seat { background: #342027; }
+.table .opponent.current-turn { background: #60232f; border-color: #ffbc55; }
+.table .action-stage { background: linear-gradient(125deg,#64212c,#24171c 70%); border-color: #ad644d; box-shadow: 0 10px 30px #0008; }
+.table .discard-board, .table .reactions { background: #181316e8; border-color: #785452; }
+.table .hand { background: #21171b; border-color: #85564a; }
+.table .hand-heading .eyebrow { color: #ffbf57; }
+.table .hand-heading span { color: #e1c9c0; }
+.table .turn-banner { background: #2a1a20; border-color: #7c4a48; }
+.table .turn-banner.active { background: linear-gradient(115deg,#9f2d3c,#59202c); border-color: #ffc164; }
+.table .turn-banner p { color: #fff0dd; font-family: Inter,system-ui,sans-serif; font-size: clamp(1.1rem,2vw,1.55rem); font-weight: 800; }
+.table .turn-banner small, .table .turn-next, .table .turn-next b { color: #f0c8ae; }
+.table .own-receipt { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid #9b684e; border-radius: 10px; background: #342026; color: #fff1dd; }
+.table .own-receipt .receipt-icon { display: grid; place-items: center; flex: 0 0 25px; height: 25px; border-radius: 50%; background: #ffb94d; color: #431d26; font-size: .9rem; font-weight: 900; }
+.table .own-receipt b, .table .own-receipt small { display: block; line-height: 1.35; }
+.table .own-receipt b { font-size: .75rem; }
+.table .own-receipt small { margin-top: 2px; color: #e1c9c0; font-size: .7rem; }
+.table .card, .table .play-area:has(#turn-action) .card { justify-content: flex-start; gap: 7px; aspect-ratio: .73; padding: 13px; border: 2px solid #efbb68; background: #fff2dc; color: #28171b; text-align: left; }
+.table .card:before, .table .card:after { display: none; }
+.table .card-value { position: static; display: flex; align-items: baseline; gap: 4px; width: auto; height: auto; border-radius: 0; background: transparent; box-shadow: none; color: #c83743; font-family: Inter,system-ui,sans-serif; font-size: clamp(1.9rem,3vw,2.6rem); font-weight: 900; line-height: 1; }
+.table .card-value small { color: #7d5d58; font-size: .45rem; font-weight: 900; letter-spacing: .13em; }
+.table .card-symbol { display: grid; place-items: center; min-height: 24%; margin: 3px 0; border-radius: 9px; background: #ffd9ac; color: #822638; font-size: clamp(2.2rem,5vw,3.8rem); font-weight: 800; line-height: 1; }
+.table .card-copy { padding: 0 0 24px; min-height: 0; }
+.table .card-name { color: #802130; font-family: Inter,system-ui,sans-serif; font-size: clamp(.95rem,1.55vw,1.2rem); font-weight: 900; line-height: 1.1; }
+.table .card-text { min-height: 0; color: #342529; font-size: clamp(.72rem,1.1vw,.85rem); font-weight: 600; line-height: 1.3; }
+.table .card-meta { color: #835d55; font-size: .58rem; }
+.table .card-count { background: #ac2f42; }
+.table .card.playable { box-shadow: 0 0 0 3px #2c1b20,0 0 0 6px #ffbc55,0 14px 25px #0008; }
+.table .featured-play { background: #fff0d7; color: #681e2d; }
+.table .featured-play>strong { background: #b42e42; color: white; font-family: Inter,system-ui,sans-serif; }
+.table .featured-play>span:last-child { inset: 50px 9px 8px; color: #5e1e2b; }
+.table .featured-play>span b { font-family: Inter,system-ui,sans-serif; font-size: 1rem; font-weight: 900; }
+.table .featured-play>span small { color: #493138; }
+.table .featured-art { display: none; }
+.table .action-sheet { border-color: #ae694d; }
+.table .action-sheet .cancel { min-height: 44px; }
+@media (max-width: 600px) {
+  .table .card, .table .play-area:has(#turn-action) .card { width: calc(50vw - 26px); min-height: 245px; padding: 9px; gap: 4px; }
+  .table .card-symbol { min-height: 20%; font-size: 2.1rem; }
+  .table .card-name { font-size: .9rem; }
+  .table .card-text { font-size: .72rem; }
+  .table .card-meta { font-size: .5rem; }
+}
+.table .round-awards { border-color: #d29355; background: #3b1c25; color: #fff4e3; }
+.table .round-awards h3 { color: #ffc066; }
+.table .round-awards ul { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.table .round-awards li { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0; padding: 9px 11px; border-radius: 8px; background: #ffffff12; color: #fff4e3; }
+.table .round-awards li b, .table .round-awards li small, .table .round-awards li strong { display: block; }
+.table .round-awards li b { font-size: .85rem; }
+.table .round-awards li small { margin-top: 2px; color: #e8c7b7; font-size: .65rem; }
+.table .round-awards li strong { flex: 0 0 auto; color: #ffbd58; font-size: 1.05rem; text-align: right; }
+.table .round-awards li strong small { color: #e9d4c7; font-size: .59rem; font-weight: 500; }
+.table .turn-guide { display: flex; align-items: center; gap: 7px; margin-top: 6px; border-top: 1px solid #ffffff38; }
+.table .turn-guide>span { color: #ffd083; font-size: .9rem; }
+.table .turn-guide small { flex: 1; margin: 0; color: #efd8cb; font-size: .67rem; font-weight: 500; letter-spacing: 0; line-height: 1.35; }
+.table .turn-guide button { flex: 0 0 44px; min-height: 44px; border: 0; background: transparent; color: #fff2db; font-size: 1.35rem; }
+.table .action-sheet [data-target] { min-height: 60px; }
+.table .action-sheet [data-target] small { color: #846c62; }
+.table .guess-grid button { display: flex; align-items: center; gap: 8px; min-height: 62px; padding: 10px; font-size: .75rem; text-align: left; }
+.table .guess-grid button b { display: grid; place-items: center; flex: 0 0 29px; height: 29px; margin: 0; border-radius: 6px; background: #ac3044; color: white; font-size: .95rem; }
+.table .action-sheet .cancel { min-height: 44px!important; }
+.table .visibility-note { display: flex; align-items: center; gap: 6px; color: #745e58; font-size: .65rem; }
+.table .visibility-note span { color: #a92c40; font-size: .9rem; }
+.table .reactions summary { justify-content: flex-start; gap: 8px; }
+.table .reactions summary span:last-child { margin-left: auto; }
+.table .reactions nav button { display: grid; place-items: center; gap: 2px; min-height: 64px; }
+.table .reactions nav button span { font-size: 1.25rem; }
+.table .reactions nav button small { font-size: .65rem; font-weight: 800; }
+.table .round-timeline { margin: 0 0 14px; color: #6e4e46; }
+.table .round-timeline summary { display: flex; align-items: center; gap: 8px; min-height: 48px; cursor: pointer; font-size: .75rem; font-weight: 800; list-style: none; }
+.table .round-timeline summary::-webkit-details-marker { display: none; }
+.table .round-timeline summary span { color: #a83243; font-size: 1.1rem; }
+.table .round-timeline ol { margin: 0 0 8px; padding-left: 22px; }
+.table .round-timeline li { margin: 5px 0; font-size: .7rem; }
+.table .result-controls { display: grid; gap: 8px; }
+.table .result-controls button, .table .replay-button { min-height: 56px; width: 100%; }
+.table .result-wait { margin: 0; padding: 10px; color: #755c55; font-size: .72rem; text-align: center; }
+.table .own-receipt { padding: 6px 8px; border: 0; border-left: 3px solid #ffb94d; border-radius: 0; background: transparent; }
+.table .review-state { position: absolute; top: 9px; right: 8px; z-index: 3; padding: 4px 6px; border-radius: 6px; background: #8d694f; color: white; font-size: .56rem; font-weight: 900; letter-spacing: .06em; }
+.table .review-cards .card.selected .review-state { background: #ac3044; }
+.table .review-cards .card:disabled { opacity: 1; filter: none; }
+@media (max-width: 600px) {
+  .table .review-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); justify-items: stretch; }
+  .table .review-cards .card { width: 100%; min-height: 245px; }
+  .table .review-cards .card:last-child:nth-child(odd) { grid-column: 1 / -1; width: calc(50% - 5px); justify-self: center; }
+}
+@media (max-width: 370px) {
+  .table .turn-banner { flex-wrap: wrap; }
+  .table .turn-next { display: block; flex: 0 0 100%; max-width: none; padding-left: 21px; }
+  .table .turn-next b { display: inline; }
 }

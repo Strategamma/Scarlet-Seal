@@ -33,6 +33,7 @@ io.on('connection', socket => {
   socket.on('game:play', (move, cb) => attempt(cb, () => { if (!session) throw new Error('Join a room first.'); service.play(session, move); return true as const; }));
   socket.on('game:return-cards', (cards, cb) => attempt(cb, () => { if (!session) throw new Error('Join a room first.'); service.returnCards(session, cards); return true as const; }));
   socket.on('game:next-round', cb => attempt(cb, () => { if (!session) throw new Error('Join a room first.'); service.nextRound(session); return true as const; }));
+  socket.on('game:rematch', cb => attempt(cb, () => { if (!session) throw new Error('Join a room first.'); service.rematch(session); return true as const; }));
   socket.on('disconnect', () => service.disconnect(socket.id));
 });
 

@@ -14,8 +14,11 @@ const saved = localStorage.getItem('scarlet-seal-session') ?? localStorage.getIt
 let session: Session | undefined = saved ? JSON.parse(saved) : undefined;
 let room: RoomView | undefined;
 let selectedCard: CardValue | undefined;
+let selectedCardIndex: number | undefined;
 let selectedTarget: string | undefined;
+let selectedGuess: CardValue | undefined;
 let selectedBottom: number[] = [];
+let showFirstRoundTips = localStorage.getItem('scarlet-seal-tips-complete') !== 'yes';
 let rulesOpen = false;
 let leaveOpen = false;
 let error = '';
@@ -65,7 +68,8 @@ socket.on('room:state', value => {
   newlyProtected = events.newlyProtected;
   const newReaction = value.reaction?.sequence && value.reaction.sequence !== room?.reaction?.sequence;
   room = value; restoringSeat = false; error = '';
-  if (!newReaction) { selectedCard = undefined; selectedTarget = undefined; selectedBottom = []; }
+  if (showFirstRoundTips && next && next.phase !== 'playing') { showFirstRoundTips = false; localStorage.setItem('scarlet-seal-tips-complete', 'yes'); }
+  if (events.selectionInvalidated) { selectedCard = undefined; selectedCardIndex = undefined; selectedTarget = undefined; selectedGuess = undefined; selectedBottom = []; }
   if (newReaction && value.reaction) {
     visibleReactionSequence = value.reaction.sequence;
     window.setTimeout(() => { if (visibleReactionSequence === value.reaction?.sequence) { visibleReactionSequence = 0; render(); } }, 2400);
@@ -117,6 +121,7 @@ const CARD_FACE_TEXT: Record<CardValue, string> = {
   8: 'Must play with Disguise or Interrogation.',
   9: 'Playing or discarding this knocks you out.'
 };
+const CARD_SYMBOLS: Record<CardValue, string> = { 0: '◎', 1: '?', 2: '◉', 3: '⚖', 4: '⬡', 5: '↻', 6: '▣', 7: '⇄', 8: '◆', 9: '!' };
 const art = (value: CardValue, className = 'card-art') => `<span class="${className} art-${value}" aria-hidden="true"></span>`;
 const CARD_INTEL: Record<CardValue, { choice: string; reveal: string }> = {
   0: { choice: 'No target', reveal: 'Your play is public' }, 1: { choice: 'Target + guess', reveal: 'Guess and result are public' },
@@ -125,13 +130,13 @@ const CARD_INTEL: Record<CardValue, { choice: string; reveal: string }> = {
   6: { choice: 'No target', reveal: 'Your choice stays private' }, 7: { choice: 'Choose a rival', reveal: 'Swap is public' },
   8: { choice: 'No target', reveal: 'No extra information' }, 9: { choice: 'No target', reveal: 'You will be eliminated' }
 };
-const intel = (value: CardValue) => `<div class="play-intel"><span>${CARD_INTEL[value].choice}</span><span>${CARD_INTEL[value].reveal}</span></div>`;
 const card = (value: CardValue, index: number, interactive = false, forced = false, bottomChoice = false, restriction = '') => {
   const data = CARDS[value];
-  const selected = bottomChoice ? selectedBottom.includes(index) : selectedCard === value;
-  const dataAttr = bottomChoice ? `data-bottom-index="${index}"` : `data-card="${value}"`;
-  return `<button type="button" aria-label="${data.name}, value ${value}. ${data.text}${restriction ? ` ${restriction}.` : interactive ? ' Select this card.' : ''}" class="card card-${value}${selected ? ' selected' : ''}${interactive ? ' playable' : ''}" ${interactive ? dataAttr : 'disabled'}>
-    ${art(value)}${forced ? '<span class="card-badge">Must play</span>' : restriction ? `<span class="card-badge restricted">Locked</span>` : ''}<span class="card-value">${value}</span><span class="card-copy"><span class="card-name">${data.name}</span><span class="card-text">${CARD_FACE_TEXT[value]}</span><span class="card-meta">${restriction || `${CARD_INTEL[value].choice} · ${CARD_INTEL[value].reveal}`}</span></span><span class="card-count" aria-hidden="true">×${data.count}</span>
+  const selected = bottomChoice ? selectedBottom.includes(index) : selectedCard === value && selectedCardIndex === index;
+  const keeping = bottomChoice && !selected && selectedBottom.length === room?.game?.bottomChoiceCount;
+  const dataAttr = bottomChoice ? `data-bottom-index="${index}"` : `data-card="${value}" data-card-index="${index}"`;
+  return `<button type="button" aria-label="${data.name}, value ${value}. ${data.text}${restriction ? ` ${restriction}.` : bottomChoice ? selected ? ' Selected to return.' : keeping ? ' This card stays in your hand.' : ' Tap to return this card.' : interactive ? ' Select this card.' : ''}" class="card card-${value}${selected ? ' selected' : ''}${interactive ? ' playable' : ''}" ${interactive ? dataAttr : 'disabled'}>
+    ${forced ? '<span class="card-badge">Must play</span>' : restriction ? `<span class="card-badge restricted">Locked</span>` : ''}${bottomChoice ? `<span class="review-state">${selected ? 'RETURN' : 'KEEP'}</span>` : ''}<span class="card-value"><small>VALUE</small>${value}</span><span class="card-symbol" aria-hidden="true">${CARD_SYMBOLS[value]}</span><span class="card-copy"><span class="card-name">${data.name}</span><span class="card-text">${CARD_FACE_TEXT[value]}</span><span class="card-meta">${restriction || CARD_INTEL[value].choice}</span></span><span class="card-count" aria-label="${data.count} in deck">×${data.count}</span>
   </button>`;
 };
 
@@ -151,7 +156,7 @@ function rulesSheet(): string {
 
 const rulesButton = (label = 'How to play') => `<button type="button" class="rules-button" data-open-rules><span>?</span>${label}</button>`;
 const leaveButton = () => `<button type="button" class="nav-button" data-leave-room aria-label="Leave this room and return home"><span aria-hidden="true">‹</span>Home</button>`;
-const leaveSheet = () => leaveOpen ? `<div class="dialog-backdrop"><section class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="leave-title"><p class="eyebrow">LEAVE ROOM</p><h2 id="leave-title">Return home?</h2><p>${room?.game ? 'Your seat will remain in this match as disconnected.' : 'You will leave this lobby.'}</p><div><button type="button" id="stay-room" class="secondary">Stay here</button><button type="button" id="confirm-leave" class="primary">Leave room</button></div></section></div>` : '';
+const leaveSheet = () => leaveOpen ? `<div class="dialog-backdrop"><section class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="leave-title"><p class="eyebrow">LEAVE ROOM</p><h2 id="leave-title">Are you sure you want to leave?</h2><p>${room?.game?.phase === 'playing' ? 'You will forfeit this round and leave the match.' : room?.game ? 'You will leave this match.' : 'You will leave this lobby.'}</p><div><button type="button" id="stay-room" class="secondary">Stay here</button><button type="button" id="confirm-leave" class="primary">Leave room</button></div></section></div>` : '';
 const logo = (className: string) => `<img class="${className}" src="/icon-192.png" alt="" aria-hidden="true">`;
 
 function landing(): string {
@@ -187,16 +192,20 @@ function lobby(): string {
 function game(): string {
   const game = room!.game!;
   const me = game.players.find(p => p.id === session!.playerId)!;
-  const ui = turnPresentation(game, me.id, selectedCard, selectedTarget);
+  const ui = turnPresentation(game, me.id, selectedCard, selectedTarget, selectedGuess);
   const { turn, nextPlayer, myTurn, choosingBottom, targets, guesses, playable, forcedCard } = ui;
+  const ownPlay = ui.lastOwnAction && game.lastAction?.sequence !== ui.lastOwnAction.sequence ? ui.lastOwnAction : undefined;
+  const ownTarget = ownPlay ? game.players.find(player => player.id === ownPlay.targetId) : undefined;
+  const ownReceipt = ownPlay ? `<div class="own-receipt" role="status"><span class="receipt-icon" aria-hidden="true">✓</span><span><b>Your last move: ${CARDS[ownPlay.card].name}${ownTarget ? ` → ${esc(ownTarget.name)}` : ''}</b><small>${esc(ownPlay.resolution)}</small></span></div>` : '';
   const instruction = esc(ui.title);
   const turnStep = ui.stepLabel;
+  const firstRoundTip = showFirstRoundTips && game.round === 1 && ui.tip ? `<div class="turn-guide"><span aria-hidden="true">ⓘ</span><small>${esc(ui.tip)}</small><button type="button" id="hide-tips" aria-label="Hide first round tips">×</button></div>` : '';
 
   let action = '';
   if (ui.phase === 'case-review') action = `<div class="action-sheet confirm" aria-label="Return cards"><div class="action-step">CASE REVIEW</div><p>Return ${game.bottomChoiceCount} card${game.bottomChoiceCount === 1 ? '' : 's'} to the bottom</p><small class="action-effect">Tap cards to choose. The unselected card stays in your hand.</small><button type="button" id="confirm-bottom" class="primary" ${selectedBottom.length === game.bottomChoiceCount ? '' : 'disabled'}>Return selected cards</button></div>`;
-  else if (ui.phase === 'choose-target' && selectedCard !== undefined) action = `<div class="action-sheet" aria-label="Choose a player"><div class="action-step">STEP 2 OF ${selectedCard === 1 ? '3' : '2'}</div><h3>Choose a player</h3><p class="action-help">${CARDS[selectedCard].text}</p>${intel(selectedCard)}${targets.map(id => { const p = game.players.find(x => x.id === id)!; return `<button type="button" data-target="${id}"><span class="target-avatar">${p.bot ? '⚙' : esc(p.name[0])}</span><span><b>${esc(p.name)}</b><small>${p.protected ? 'Protected' : 'Available'}</small></span><span>›</span></button>`; }).join('')}<button type="button" class="cancel">Choose a different card</button></div>`;
-  else if (ui.phase === 'guess' && selectedCard !== undefined && selectedTarget) action = `<div class="action-sheet" aria-label="Choose a card guess"><div class="action-step">STEP 3 OF 3</div><h3>What card do they hold?</h3><p class="action-help">A correct guess eliminates ${esc(game.players.find(p => p.id === selectedTarget)?.name ?? 'them')}.</p><div class="guess-grid">${guesses.map(v => `<button type="button" data-guess="${v}"><b>${v}</b>${CARDS[v].name}</button>`).join('')}</div><button type="button" class="cancel">Choose a different card</button></div>`;
-  else if (ui.phase === 'confirm' && selectedCard !== undefined) action = `<div class="action-sheet confirm" aria-label="Confirm card play"><div class="action-step">FINAL STEP</div><p>Play <b>${CARDS[selectedCard].name}</b>${selectedTarget ? ` on <b>${esc(game.players.find(p => p.id === selectedTarget)!.name)}</b>` : ''}?</p><small class="action-effect">${CARDS[selectedCard].text}</small>${intel(selectedCard)}<button type="button" id="confirm" class="primary">Confirm play</button><button type="button" class="cancel">Choose a different card</button></div>`;
+  else if (ui.phase === 'choose-target' && selectedCard !== undefined) action = `<div class="action-sheet" aria-label="Choose a player"><div class="action-step">STEP 2 OF ${selectedCard === 1 ? '3' : '2'}</div><h3>Choose a player</h3><p class="action-help">${CARDS[selectedCard].name}: ${CARD_FACE_TEXT[selectedCard]}</p>${targets.map(id => { const p = game.players.find(x => x.id === id)!; return `<button type="button" data-target="${id}"><span class="target-avatar">${p.bot ? '⚙' : esc(p.name[0])}</span><span><b>${esc(p.name)}</b><small>${p.tokens} ◆ seals</small></span><span aria-hidden="true">›</span></button>`; }).join('')}<button type="button" class="cancel">‹ Back to cards</button></div>`;
+  else if (ui.phase === 'guess' && selectedCard !== undefined && selectedTarget) action = `<div class="action-sheet" aria-label="Choose a card guess"><div class="action-step">STEP 3 OF 3</div><h3>What card do they hold?</h3><p class="action-help">Guess ${esc(game.players.find(p => p.id === selectedTarget)?.name ?? 'their')}’s card</p><div class="guess-grid">${guesses.map(v => `<button type="button" data-guess="${v}"><b>${v}</b>${CARDS[v].name}</button>`).join('')}</div><button type="button" class="cancel">‹ Back to players</button></div>`;
+  else if (ui.phase === 'confirm' && selectedCard !== undefined) action = `<div class="action-sheet confirm" aria-label="Confirm card play"><div class="action-step">FINAL STEP</div><p>Play <b>${CARDS[selectedCard].name}</b>${selectedTarget ? ` on <b>${esc(game.players.find(p => p.id === selectedTarget)!.name)}</b>` : ''}${selectedGuess !== undefined ? `, guessing <b>${CARDS[selectedGuess].name}</b>` : ''}?</p><small class="action-effect">${CARDS[selectedCard].text}</small><small class="visibility-note"><span aria-hidden="true">◉</span>${CARD_INTEL[selectedCard].reveal}</small><button type="button" id="confirm" class="primary">Play card</button><button type="button" class="cancel">${selectedGuess !== undefined ? '‹ Back to guesses' : selectedTarget ? '‹ Back to players' : '‹ Back to cards'}</button></div>`;
 
   const winningIds = game.phase === 'match-over' ? game.matchWinnerIds : game.winnerIds;
   const winnerNames = winningIds.map(id => game.players.find(p => p.id === id)?.name).filter(Boolean).join(' & ');
@@ -207,15 +216,27 @@ function game(): string {
   const publicDiscards = `<section id="public-cards" class="discard-board" aria-label="All public cards"><div class="discard-heading"><p class="eyebrow">PUBLIC CARDS</p><small>${game.players.length > 3 ? 'Swipe for more →' : 'Use these to narrow the deck'}</small></div>${game.removedCount ? `<p class="hidden-cards-note">${game.removedCount} cards were set aside facedown. Their identities are private.</p>` : ''}<div class="discard-lanes">${game.players.map(player => `<article class="discard-lane ${game.lastAction?.targetId === player.id ? 'targeted' : ''}"><b>${player.id === me.id ? 'You' : esc(player.name)}</b><div>${player.discards.length ? player.discards.map((value, index) => `<span class="discard-chip art-${value} ${game.lastAction?.actorId === player.id && index === player.discards.length - 1 ? 'latest' : ''} ${index >= (newDiscardCounts.get(player.id) ?? Infinity) ? 'new-discard' : ''}" role="img" aria-label="${CARDS[value].name}, value ${value}"><i>${value}</i><small>${CARDS[value].name}</small></span>`).join('') : '<em>None yet</em>'}</div></article>`).join('')}</div></section>`;
   const decisivePlays = game.log.filter(line => !line.startsWith('Round ')).slice(-4);
   const roundReveals = game.roundSummary?.reveals.map(reveal => { const player = game.players.find(p => p.id === reveal.playerId); return `<li><span class="reveal-card art-${reveal.card}" aria-hidden="true"><b>${reveal.card}</b></span><span><b>${player?.id === me.id ? 'You' : esc(player?.name ?? 'Player')}</b><small>${CARDS[reveal.card].name} · value ${reveal.card}</small></span></li>`; }).join('') ?? '';
-  const roundOverlay = game.phase !== 'playing' ? `<section class="result case-summary round-summary" aria-labelledby="result-title"><div class="seal-stamp" aria-hidden="true"><span>${game.phase === 'match-over' ? 'CASE' : 'ROUND'}</span><b>CLOSED</b></div><p class="eyebrow">${game.phase === 'match-over' ? 'CASE CLOSED' : `ROUND ${game.round} COMPLETE`}</p><h2 id="result-title">${esc(winnerNames || 'A rival')} ${winningIds.length > 1 ? 'win' : 'wins'}!</h2>${game.roundSummary ? `<section class="round-reason"><h3>Why the round ended</h3><p>${esc(game.roundSummary.reason)}</p>${roundReveals ? `<ul>${roundReveals}</ul>` : ''}</section>` : ''}<section><h3>Decisive plays</h3><ol>${decisivePlays.map(line => `<li>${esc(line)}</li>`).join('')}</ol></section>${game.phase === 'round-over' && room!.players.find(p => p.id === me.id)?.host ? '<button type="button" id="next-round" class="primary">Deal next round</button>' : game.phase === 'round-over' ? '<p>Waiting for the host…</p>' : '<p>The case has found its sharpest detective.</p><button type="button" id="finish-home" class="secondary">Return home</button>'}</section>` : '';
+  const awardRows = game.players.flatMap(player => {
+    const awards = game.roundSummary?.awards.filter(award => award.playerId === player.id) ?? [];
+    if (!awards.length) return [];
+    const reasons = awards.map(award => award.source === 'round' ? 'Round win' : 'Wiretap bonus').join(' + ');
+    return [`<li><span><b>${player.id === me.id ? 'You' : esc(player.name)}</b><small>${reasons}</small></span><strong>+${awards.length} ◆ <small>${player.tokens} / ${tokenTarget(game.players.length)} total</small></strong></li>`];
+  }).join('');
+  const isHost = room!.players.some(player => player.id === me.id && player.host);
+  const roundTimeline = decisivePlays.length ? `<details class="round-timeline"><summary><span aria-hidden="true">▤</span> Round timeline</summary><ol>${decisivePlays.map(line => `<li>${esc(line)}</li>`).join('')}</ol></details>` : '';
+  const resultActions = game.phase === 'round-over'
+    ? isHost ? `<button type="button" id="next-round" class="primary replay-button" ${busy ? 'disabled' : ''}>↻ Deal next round</button>` : '<p class="result-wait">Waiting for the host to deal…</p>'
+    : isHost ? `<div class="result-controls"><button type="button" id="rematch" class="primary replay-button" ${busy ? 'disabled' : ''}>↻ Play again</button><button type="button" id="finish-home" class="secondary">Leave table</button></div>`
+      : '<div class="result-controls"><p class="result-wait">Waiting for the host to play again…</p><button type="button" id="finish-home" class="secondary">Leave table</button></div>';
+  const roundOverlay = game.phase !== 'playing' ? `<section class="result case-summary round-summary" aria-labelledby="result-title"><div class="seal-stamp" aria-hidden="true"><span>${game.phase === 'match-over' ? 'CASE' : 'ROUND'}</span><b>CLOSED</b></div><p class="eyebrow">${game.phase === 'match-over' ? 'CASE CLOSED' : `ROUND ${game.round} COMPLETE`}</p><h2 id="result-title">${esc(winnerNames || 'A rival')} ${winningIds.length > 1 ? 'win' : 'wins'}!</h2>${awardRows ? `<section class="round-awards"><h3>Seals earned</h3><ul>${awardRows}</ul></section>` : ''}${resultActions}${game.roundSummary ? `<section class="round-reason"><h3>Why the round ended</h3><p>${esc(game.roundSummary.reason)}</p>${roundReveals ? `<ul>${roundReveals}</ul>` : ''}</section>` : ''}${roundTimeline}</section>` : '';
   const reaction = room!.reaction && visibleReactionSequence === room!.reaction.sequence ? room!.reaction : undefined;
   const reactionPlayer = reaction ? room!.players.find(player => player.id === reaction.playerId) : undefined;
   const aliveCount = game.players.filter(p => !p.eliminated).length;
   return `<main class="table"><header class="table-header"><span class="table-brand">${logo('mini-crest')}<b>Scarlet Seal</b><small>ROUND ${game.round}</small></span><nav aria-label="Game navigation">${leaveButton()}${rulesButton('Rules')}</nav><span class="deck-count">DRAW PILE <b>${game.deckCount}</b></span></header>
     ${roundOverlay}
     <section class="game-felt ${roundStarted ? 'round-enter' : ''}" aria-label="Game table"><section class="table-seats" aria-label="Players in turn order"><div class="table-section-heading"><span>INVESTIGATORS <b>${aliveCount} / ${game.players.length} IN</b></span><small>First to ${tokenTarget(game.players.length)} seals</small></div><div class="opponents">${game.players.map((p, index) => { const isMe = p.id === me.id; const targeted = game.lastAction?.targetId === p.id; const hasTurn = game.turnPlayerId === p.id && game.phase === 'playing'; return `<div data-player-id="${p.id}" class="opponent ${isMe ? 'your-seat' : ''} ${p.eliminated ? 'out' : 'alive'} ${targeted ? 'targeted' : ''} ${hasTurn ? 'current-turn' : ''} ${hasTurn && turnChanged ? 'turn-enter' : ''} ${newlyOut.has(p.id) ? 'just-out' : ''} ${newlyProtected.has(p.id) ? 'just-shielded' : ''}"><div class="seat-top"><span class="seat-order">${index + 1}</span><b>${isMe ? 'You' : esc(p.name)}</b><span class="seat-score ${earnedSeals.has(p.id) ? 'seal-earned' : ''}">${p.tokens} ◆</span></div><div class="seat-bottom"><span class="opponent-card ${p.handCount > 1 ? 'two-cards' : ''}" aria-label="${isMe ? 'Your hand is below' : `${p.handCount} hidden card${p.handCount === 1 ? '' : 's'}`}">${p.eliminated ? '✕' : isMe ? '↓' : '?'}</span><span class="seat-state"><strong>${p.eliminated ? 'OUT' : hasTurn ? (isMe ? 'YOUR TURN' : 'PLAYING') : 'IN'}</strong>${p.protected ? '<small>Shielded</small>' : isMe ? '<small>Your hand below</small>' : `<small>${p.handCount} card${p.handCount === 1 ? '' : 's'}</small>`}</span></div></div>`; }).join('')}</div></section><div class="board-center">${actionStage}</div>${publicDiscards}</section>
-    ${game.phase === 'playing' ? `<section class="decision-zone"><section class="turn-banner ${myTurn ? 'active' : ''} ${turnChanged ? 'turn-enter' : ''}" aria-live="polite"><span class="turn-dot" aria-hidden="true"></span><div><small>${turnStep}</small><p>${instruction}</p></div><span class="turn-next">${nextPlayer ? `NEXT <b>${nextPlayer.id === me.id ? 'YOU' : esc(nextPlayer.name)}</b>` : ''}</span></section>${game.notice ? `<p class="turn-notice"><b>Private clue</b>${esc(game.notice)}</p>` : ''}<section class="play-area"><section class="hand"><div class="hand-heading"><p class="eyebrow">${game.hand.length > 1 ? 'YOUR TWO CARDS' : 'YOUR CARD'}</p><span>${choosingBottom ? `${selectedBottom.length} of ${game.bottomChoiceCount} selected` : myTurn ? 'Choose one to play' : 'Only you can see this'}</span></div><div class="cards ${choosingBottom ? 'review-cards' : ''}">${game.hand.map((v, index) => card(v, index, choosingBottom || (myTurn && playable.has(v)), forcedCard === v, choosingBottom, myTurn && !choosingBottom && !playable.has(v) ? (forcedCard !== undefined ? 'Red Herring must be played' : 'Unavailable now') : '')).join('')}</div></section>${action ? `<div id="turn-action">${action}</div>` : ''}</section></section>` : ''}
-    <details class="reactions"><summary>React to the table <span aria-hidden="true">✦</span></summary><nav aria-label="Table reactions"><button type="button" data-reaction="Suspicious">Suspicious</button><button type="button" data-reaction="Nice try">Nice try</button><button type="button" data-reaction="Case closed">Case closed</button></nav></details><details class="case-feed" aria-label="Recent public plays"><summary>Case notes <span>${game.publicActions.length} plays</span></summary><ol>${game.publicActions.slice(-5).reverse().map(event => { const actor = game.players.find(p => p.id === event.actorId); const target = game.players.find(p => p.id === event.targetId); return `<li><span class="play-value">${event.card}</span><span><b>${actor?.id === me.id ? 'You' : esc(actor?.name ?? 'Player')} played ${CARDS[event.card].name}${target ? ` on ${target.id === me.id ? 'you' : esc(target.name)}` : ''}</b><small>${esc(event.resolution)}</small></span></li>`; }).join('')}</ol></details>
+    ${game.phase === 'playing' ? `<section class="decision-zone"><section class="turn-banner ${myTurn ? 'active' : ''} ${turnChanged ? 'turn-enter' : ''}" aria-live="polite"><span class="turn-dot" aria-hidden="true"></span><div><small>${turnStep}</small><p>${instruction}</p>${firstRoundTip}</div><span class="turn-next">${nextPlayer ? `NEXT <b>${nextPlayer.id === me.id ? 'YOU' : esc(nextPlayer.name)}</b>` : ''}</span></section>${ownReceipt}${game.notice ? `<p class="turn-notice"><b>Private clue</b>${esc(game.notice)}</p>` : ''}<section class="play-area"><section class="hand"><div class="hand-heading"><p class="eyebrow">${game.hand.length > 1 ? 'YOUR TWO CARDS' : 'YOUR CARD'}</p><span>${choosingBottom ? `${selectedBottom.length} of ${game.bottomChoiceCount} selected` : myTurn ? 'Choose one to play' : 'Only you can see this'}</span></div><div class="cards ${choosingBottom ? 'review-cards' : ''}">${game.hand.map((v, index) => card(v, index, choosingBottom ? selectedBottom.includes(index) || selectedBottom.length < game.bottomChoiceCount : myTurn && playable.has(v), forcedCard === v, choosingBottom, myTurn && !choosingBottom && !playable.has(v) ? (forcedCard !== undefined ? 'Red Herring must be played' : 'Unavailable now') : '')).join('')}</div></section>${action ? `<div id="turn-action">${action}</div>` : ''}</section></section>` : ''}
+    <details class="reactions"><summary><span aria-hidden="true">☺</span> React <span aria-hidden="true">⌄</span></summary><nav aria-label="Table reactions"><button type="button" data-reaction="Suspicious"><span aria-hidden="true">👀</span><small>Suspicious</small></button><button type="button" data-reaction="Nice try"><span aria-hidden="true">✨</span><small>Nice try</small></button><button type="button" data-reaction="Case closed"><span aria-hidden="true">✅</span><small>Case closed</small></button></nav></details><details class="case-feed" aria-label="Recent public plays"><summary>Case notes <span>${game.publicActions.length} plays</span></summary><ol>${game.publicActions.slice(-5).reverse().map(event => { const actor = game.players.find(p => p.id === event.actorId); const target = game.players.find(p => p.id === event.targetId); return `<li><span class="play-value">${event.card}</span><span><b>${actor?.id === me.id ? 'You' : esc(actor?.name ?? 'Player')} played ${CARDS[event.card].name}${target ? ` on ${target.id === me.id ? 'you' : esc(target.name)}` : ''}</b><small>${esc(event.resolution)}</small></span></li>`; }).join('')}</ol></details>
     ${reaction && reactionPlayer ? `<div class="reaction-pop" role="status"><b>${reactionPlayer.id === me.id ? 'You' : esc(reactionPlayer.name)}</b><span>${reaction.text}</span></div>` : ''}${error ? `<p class="error">${esc(error)}</p>` : ''}</main>${rulesSheet()}${leaveSheet()}`;
 }
 
@@ -288,6 +309,7 @@ function render(): void {
 const revealTurnAction = () => requestAnimationFrame(() => document.querySelector('#turn-action')?.scrollIntoView({ block: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }));
 
 function bind(): void {
+  document.querySelector('#hide-tips')?.addEventListener('click', () => { showFirstRoundTips = false; localStorage.setItem('scarlet-seal-tips-complete', 'yes'); render(); document.querySelector<HTMLElement>('.hand .card.playable, [data-open-rules]')?.focus(); });
   document.querySelectorAll('[data-open-rules]').forEach(el => el.addEventListener('click', () => { rulesOpen = true; render(); requestAnimationFrame(() => document.querySelector<HTMLElement>('#close-rules')?.focus()); }));
   document.querySelector('#close-rules')?.addEventListener('click', () => { rulesOpen = false; render(); });
   document.querySelector('.rules-backdrop')?.addEventListener('click', e => { if (e.target === e.currentTarget) { rulesOpen = false; render(); } });
@@ -304,7 +326,7 @@ function bind(): void {
   document.querySelectorAll<HTMLElement>('[data-remove-bot]').forEach(el => el.addEventListener('click', () => emit(cb => socket.emit('room:remove-bot', el.dataset.removeBot!, cb))));
   document.querySelector('#start')?.addEventListener('click', () => emit(cb => socket.emit('game:start', cb)));
   document.querySelector('#next-round')?.addEventListener('click', () => emit(cb => socket.emit('game:next-round', cb)));
-  document.querySelector('#finish-home')?.addEventListener('click', returnHome);
+  document.querySelector('#rematch')?.addEventListener('click', () => emit(cb => socket.emit('game:rematch', cb)));
   document.querySelectorAll<HTMLElement>('[data-reaction]').forEach(el => el.addEventListener('click', () => emit(cb => socket.emit('room:react', el.dataset.reaction as 'Suspicious' | 'Nice try' | 'Case closed', cb))));
   document.querySelector('#share')?.addEventListener('click', async () => {
     const data = { title: 'Join my Scarlet Seal room', text: `Join room ${room!.code}`, url: `${location.origin}?room=${room!.code}` };
@@ -313,39 +335,38 @@ function bind(): void {
       else { await navigator.clipboard.writeText(`${data.text}: ${data.url}`); const button = document.querySelector('#share')!; button.textContent = 'Invitation copied!'; }
     } catch (reason) { if (reason instanceof DOMException && reason.name === 'AbortError') return; error = 'Could not share this invitation. Copy the room code instead.'; render(); }
   });
-  document.querySelectorAll('[data-leave-room]').forEach(el => el.addEventListener('click', () => { leaveOpen = true; render(); requestAnimationFrame(() => document.querySelector<HTMLElement>('#stay-room')?.focus()); }));
+  document.querySelectorAll('[data-leave-room], #finish-home').forEach(el => el.addEventListener('click', () => { leaveOpen = true; render(); requestAnimationFrame(() => document.querySelector<HTMLElement>('#stay-room')?.focus()); }));
   document.querySelector('#stay-room')?.addEventListener('click', () => { leaveOpen = false; render(); });
   document.querySelector('#confirm-leave')?.addEventListener('click', returnHome);
   document.querySelectorAll<HTMLElement>('[data-card]').forEach(el => el.addEventListener('click', () => {
     const value = Number(el.dataset.card) as CardValue;
-    const moves = room!.game!.legalMoves.filter(move => move.card === value);
-    const direct = moves.find(move => !move.targetId && move.guess === undefined);
-    if (direct && moves.length === 1 && [0, 4, 6, 8].includes(value)) { play(direct); return; }
-    selectedCard = value; selectedTarget = undefined; render(); revealTurnAction();
+    selectedCard = value; selectedCardIndex = Number(el.dataset.cardIndex); selectedTarget = undefined; selectedGuess = undefined; render(); revealTurnAction();
   }));
   document.querySelectorAll<HTMLElement>('[data-bottom-index]').forEach(el => el.addEventListener('click', () => {
     const index = Number(el.dataset.bottomIndex);
     selectedBottom = selectedBottom.includes(index) ? selectedBottom.filter(value => value !== index) : selectedBottom.length < room!.game!.bottomChoiceCount ? [...selectedBottom, index] : selectedBottom;
     render();
   }));
-  document.querySelectorAll<HTMLElement>('[data-target]').forEach(el => el.addEventListener('click', () => { selectedTarget = el.dataset.target; render(); revealTurnAction(); }));
-  document.querySelectorAll<HTMLElement>('[data-guess]').forEach(el => el.addEventListener('click', () => play({ card: selectedCard!, targetId: selectedTarget, guess: Number(el.dataset.guess) as CardValue })));
-  document.querySelector('#confirm')?.addEventListener('click', () => play({ card: selectedCard!, targetId: selectedTarget }));
+  document.querySelectorAll<HTMLElement>('[data-target]').forEach(el => el.addEventListener('click', () => { selectedTarget = el.dataset.target; selectedGuess = undefined; render(); revealTurnAction(); }));
+  document.querySelectorAll<HTMLElement>('[data-guess]').forEach(el => el.addEventListener('click', () => { selectedGuess = Number(el.dataset.guess) as CardValue; render(); revealTurnAction(); }));
+  document.querySelector('#confirm')?.addEventListener('click', () => play({ card: selectedCard!, targetId: selectedTarget, guess: selectedGuess }));
   document.querySelector('#confirm-bottom')?.addEventListener('click', () => emit(cb => socket.emit('game:return-cards', selectedBottom.map(index => room!.game!.hand[index]), cb)));
-  document.querySelectorAll('.cancel').forEach(el => el.addEventListener('click', () => { selectedCard = undefined; selectedTarget = undefined; render(); }));
+  document.querySelectorAll('.cancel').forEach(el => el.addEventListener('click', backChoice));
 }
+function backChoice(): void { if (selectedGuess !== undefined) selectedGuess = undefined; else if (selectedTarget) selectedTarget = undefined; else { selectedCard = undefined; selectedCardIndex = undefined; } render(); }
 function play(move: Move): void { emit(cb => socket.emit('game:play', move, cb)); }
 function returnHome(): void { emit(cb => socket.emit('room:leave', result => { cb(result); if (result.ok) { localStorage.removeItem('scarlet-seal-session'); localStorage.removeItem('royal-post-session'); location.href = location.origin; } })); }
 
 window.render_game_to_text = () => {
   const game = room?.game;
   const me = game?.players.find(player => player.id === session?.playerId);
+  const guide = game && me && showFirstRoundTips && game.round === 1 ? turnPresentation(game, me.id, selectedCard, selectedTarget, selectedGuess).tip : undefined;
   return JSON.stringify({
     coordinateSystem: 'DOM interface ordered top-to-bottom; no spatial playfield',
     screen: !room ? 'home' : !game ? 'lobby' : 'game', rulesOpen, roomCode: room?.code, availableRooms,
-    phase: game?.phase, round: game?.round, deckCount: game?.deckCount,
+    phase: game?.phase, round: game?.round, deckCount: game?.deckCount, firstRoundTip: guide,
     turnPlayerId: game?.turnPlayerId, playerId: me?.id, hand: game?.hand,
-    selectedCard, selectedTarget, selectedBottom, legalMoves: game?.legalMoves, bottomChoiceCount: game?.bottomChoiceCount,
+    selectedCard, selectedCardIndex, selectedTarget, selectedGuess, selectedBottom, legalMoves: game?.legalMoves, bottomChoiceCount: game?.bottomChoiceCount,
     removedCount: game?.removedCount, players: game?.players.map(player => ({ id: player.id, name: player.name, tokens: player.tokens, protected: player.protected, eliminated: player.eliminated, handCount: player.handCount, discards: player.discards })),
     lastAction: game?.lastAction, roundSummary: game?.roundSummary, recentLog: game?.log.slice(-3), notice: game?.notice
   });
@@ -354,7 +375,7 @@ window.advanceTime = () => {};
 document.addEventListener('keydown', async e => {
   if (e.key === 'Escape' && rulesOpen) { rulesOpen = false; render(); return; }
   if (e.key === 'Escape' && leaveOpen) { leaveOpen = false; render(); return; }
-  if (e.key === 'Escape' && (selectedCard !== undefined || selectedTarget !== undefined)) { selectedCard = undefined; selectedTarget = undefined; render(); return; }
+  if (e.key === 'Escape' && (selectedCard !== undefined || selectedTarget !== undefined || selectedGuess !== undefined)) { backChoice(); return; }
   if (e.key.toLowerCase() === 'f' && !['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) { if (document.fullscreenElement) await document.exitFullscreen(); else await document.documentElement.requestFullscreen(); }
 });
 

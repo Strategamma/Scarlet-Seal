@@ -63,9 +63,7 @@ export class RoomService {
     if (room.hostId !== member.id) throw new Error('Only the host can add a bot.');
     if (room.game) throw new Error('The game has already started.');
     if (room.members.length >= MAX_PLAYERS) throw new Error('This room is full.');
-    const usedNames = new Set(room.members.map(existing => existing.name));
-    const name = BOT_NAMES.find(candidate => !usedNames.has(candidate)) ?? `Court Bot ${room.members.filter(existing => existing.bot).length + 1}`;
-    room.members.push({ id: id(), token: token(), name, bot: true, connected: true });
+    this.addBotMember(room);
     this.push(room);
   }
 
@@ -98,8 +96,21 @@ export class RoomService {
   start(session: Session): void {
     const { room, member } = this.authenticate(session);
     if (room.hostId !== member.id) throw new Error('Only the host can start.');
+    if (room.game) throw new Error('This game has already started.');
     if (room.members.length < 2) throw new Error('Add a bot or wait for another player.');
     room.game = createGame(room.members.map(m => ({ id: m.id, name: m.name, bot: m.bot })));
+    this.push(room); this.scheduleBot(room);
+  }
+
+  rematch(session: Session): void {
+    const { room, member } = this.authenticate(session);
+    if (room.hostId !== member.id) throw new Error('Only the host can start a rematch.');
+    if (room.game?.phase !== 'match-over') throw new Error('Finish the match before starting again.');
+    if (room.botTimer) { clearTimeout(room.botTimer); room.botTimer = undefined; }
+    room.members = room.members.filter(player => player.bot || player.connected);
+    if (room.members.length < 2) this.addBotMember(room);
+    room.reaction = undefined;
+    room.game = createGame(room.members.map(player => ({ id: player.id, name: player.name, bot: player.bot })));
     this.push(room); this.scheduleBot(room);
   }
 
@@ -168,6 +179,11 @@ export class RoomService {
     const member = room.members.find(m => m.id === session.playerId && m.token === session.token);
     if (!member) throw new Error('Your session is no longer valid.');
     return { room, member };
+  }
+  private addBotMember(room: Room): void {
+    const usedNames = new Set(room.members.map(existing => existing.name));
+    const name = BOT_NAMES.find(candidate => !usedNames.has(candidate)) ?? `Court Bot ${room.members.filter(existing => existing.bot).length + 1}`;
+    room.members.push({ id: id(), token: token(), name, bot: true, connected: true });
   }
   private get(code: string): Room {
     const room = rooms.get(code.trim().toUpperCase());

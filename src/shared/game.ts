@@ -29,7 +29,7 @@ export interface GameState {
   winnerIds: string[]; matchWinnerIds: string[];
   lastAction?: PublicAction;
   publicActions: PublicAction[];
-  roundSummary?: { reason: string; reveals: { playerId: string; card: CardValue }[] };
+  roundSummary?: { reason: string; reveals: { playerId: string; card: CardValue }[]; awards: { playerId: string; source: 'round' | 'wiretap' }[] };
   actionSequence: number;
   pendingBottom?: { playerId: string; count: number };
 }
@@ -230,13 +230,15 @@ function finishRound(state: GameState): void {
     reason: survivors.length === 1
       ? `${survivors[0].name} was the last investigator still in the case.`
       : `The deck ran out. ${survivors.map(player => `${player.name} held ${CARDS[player.hand[0] ?? 0].name} (${player.hand[0] ?? 0})`).join('; ')}. The highest card wins.`,
-    reveals: survivors.map(player => ({ playerId: player.id, card: player.hand[0] ?? 0 }))
+    reveals: survivors.map(player => ({ playerId: player.id, card: player.hand[0] ?? 0 })),
+    awards: winners.map(player => ({ playerId: player.id, source: 'round' }))
   };
   state.log.push(`${winners.map(p => p.name).join(' & ')} won the round.`);
 
   const wiretapUsers = survivors.filter(p => p.discards.includes(0));
   if (wiretapUsers.length === 1) {
     wiretapUsers[0].tokens++;
+    state.roundSummary.awards.push({ playerId: wiretapUsers[0].id, source: 'wiretap' });
     state.log.push(`${wiretapUsers[0].name} earned bonus evidence from a lone Wiretap.`);
   }
 

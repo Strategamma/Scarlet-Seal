@@ -14,10 +14,14 @@ const game = (): GameView => ({
 test('turn presentation follows choose, target, zero-value guess, and confirmation', () => {
   const state = game();
   assert.equal(turnPresentation(state, 'a').phase, 'choose-card');
+  assert.match(turnPresentation(state, 'a').tip, /Keep the other/);
   assert.equal(turnPresentation(state, 'a', 1).phase, 'choose-target');
   const guess = turnPresentation(state, 'a', 1, 'b');
   assert.equal(guess.phase, 'guess');
   assert.deepEqual(guess.guesses, [0, 2]);
+  assert.match(guess.tip, /correct guess/);
+  assert.equal(turnPresentation(state, 'a', 1, 'b', 0).phase, 'confirm');
+  assert.equal(turnPresentation(state, 'a', 1, 'b', 9).phase, 'guess');
   assert.equal(turnPresentation(state, 'a', 3, 'b').phase, 'confirm');
 });
 
@@ -37,6 +41,18 @@ test('waiting, private review, and round completion have distinct phases', () =>
   assert.equal(turnPresentation(state, 'b').phase, 'waiting');
   state.bottomChoiceCount = 2;
   assert.equal(turnPresentation(state, 'a').phase, 'case-review');
+  assert.match(turnPresentation(state, 'a').tip, /private/);
   state.phase = 'round-over';
   assert.equal(turnPresentation(state, 'a').phase, 'round-result');
+});
+
+test('a player can still see their result after a rapid rival reply', () => {
+  const state = game();
+  state.publicActions = [
+    { sequence: 1, actorId: 'a', card: 1, targetId: 'b', resolution: 'Incorrect: Bea stayed in the case.' },
+    { sequence: 2, actorId: 'b', card: 4, resolution: 'Bea is protected until their next turn.' }
+  ];
+  state.lastAction = state.publicActions[1];
+  assert.equal(turnPresentation(state, 'a').lastOwnAction?.sequence, 1);
+  assert.equal(turnPresentation(state, 'c').lastOwnAction, undefined);
 });
