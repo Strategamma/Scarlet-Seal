@@ -13,6 +13,8 @@ Open `http://localhost:5173`. For same-Wi‑Fi play, other devices open `http://
 
 Use **Play now** for an immediate one-person game against a bot. In a hosted room, the host can add or remove bots until the table has 2–6 occupied seats.
 
+If the game server is unavailable, **Play against a bot** starts a private offline case using the same rules. Its state stays in this browser and resumes after reopening an already cached or installed PWA. Multiplayer still requires the server. An arcade launch may prefill the editable multiplayer name from `#arcadeName=...`; a previously saved game name takes priority, and the hint is removed from the URL.
+
 ## Production
 
 ```bash
@@ -22,20 +24,23 @@ PORT=3000 npm start
 
 Point `decadenceinc.com` (or a game subdomain) to the host and reverse-proxy HTTPS traffic to port 3000. The proxy must support WebSocket upgrades for `/socket.io/`. HTTPS is required for reliable PWA installation. `GET /health` is available for health checks.
 
-Rooms are stored in memory in this first version. Use one server process; restarting it clears active rooms. Durable rooms or horizontal scaling will require a shared store such as Redis.
+Set `DATABASE_URL` to a PostgreSQL connection string to preserve active rooms across server restarts. The server loads saved rooms before accepting connections; returning players reclaim their seats with their saved session tokens. Without `DATABASE_URL`, local development keeps rooms in memory only. Keep one web instance: room coordination still happens in that instance.
 
 ### Render
 
-The repository includes `render.yaml` for a single Docker web service in Render's Singapore region. It serves both the PWA and Socket.IO, uses `/health` for health checks, and declares `scarletseal.decadenceinc.com` as its custom domain.
+The repository includes `render.yaml` for one Docker web service and a PostgreSQL database in Render's Singapore region. The database stores complete authoritative room snapshots, including private hands and reconnect tokens. The service uses `/health` for health checks and declares `scarletseal.decadenceinc.com` as its custom domain. Render's free PostgreSQL plan expires and has no backups; move the database to a durable plan before relying on long-term availability.
 
 After the GitHub repository is pushed:
 
 1. In Render, create a new Blueprint from `Strategamma/Scarlet-Seal`.
-2. Approve the `scarlet-seal` web service.
+2. Approve the `scarlet-seal` web service and `scarlet-seal-db` database.
 3. In the DNS provider for `decadenceinc.com`, add the CNAME value shown by Render for `scarletseal`.
 4. Wait for Render to verify the domain and issue TLS.
 
 Players on any internet connection—including devices sharing Wi-Fi—can use the Render URL. For internet-free same-Wi-Fi play, run the app locally and have devices open the host computer's LAN address.
+
+When a host disconnects, the room pauses. Connected people can agree to let the first connected player in seat order become host, or wait for the original host to return. The former host keeps their seat and does not take control back after a transfer. A web-service restart also pauses saved rooms until players reconnect.
+If the current turn belongs to a disconnected person, the host may wait or forfeit that person's current round so play can continue.
 
 ## Checks
 

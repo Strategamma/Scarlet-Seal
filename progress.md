@@ -59,8 +59,16 @@ Original prompt: I want to build a mobile PWA game based on the board game love 
 - Simplified Case Review to one tap on the card to keep; the other cards are previewed as returning, and the confirmation names the kept card. Index-based choice preserves duplicate-value cards. All 36 tests, build, and diff checks pass; visual playtesting remains unavailable under the previously declined browser access.
 - Audited values 0–9. Target prompts now name each card's action, final confirmations preview the held card and risk, Hunch's public guess appears on the central receipt and in Case notes, and Wiretap/Red Herring/no-target/empty-deck results explain what happened. Fixed Case Review's Change button being caught by generic Back. All 39 tests, production build, and diff checks pass; visual playtesting remains outstanding.
 - Rebuilt the screenshot-visible clue, last-play, and Case notes tiles; fixed Case notes row separation and the seat-heading spacing. A new personal turn now has a brief gold cue and a Web Audio chime with a mute button. Safe plays resolve on the final card, target, or guess tap; self-eliminating plays still confirm. All 41 tests, production build, and diff checks pass; live visual and audio QA remain outstanding.
+- End-to-end UI pass: enlarged small controls and support copy, labeled lobby presence, collapsed rule details behind scannable sections, trapped/restored dialog focus, and made public discards tappable with an accessible in-place card inspector. Open panels and discard scroll survive live updates; dialogs stop background scrolling. Replaced reaction emoji with matching line symbols. Browser visual QA remains unavailable under the previously declined local browser access.
 
 ## TODO
 
 - Configure the production host/reverse proxy and DNS outside this repository.
 - Complete screenshot-based mobile QA on a host where Chromium processes are permitted.
+
+## Arcade handoff integration (2026-10-12)
+
+- Added validated, removable `arcadeName` prefill with saved-name priority; added browser-local solo play from cached PWA assets when the server is unavailable.
+- Host loss now pauses the room until connected humans agree to deterministic transfer. A returning former host keeps the seat without reclaiming control; the new host can resolve an absent player's turn by forfeiting that round.
+- PostgreSQL room snapshots load before server startup and preserve seats, private hands, phase, scores, and reconnect tokens across web-service restarts. Render Blueprint now provisions a database; local development works without one. Socket reconnect auth now follows newly issued sessions.
+- Verification: 50 tests and build pass, including snapshot reload, migration votes, round transition, and offline solo. Required Playwright run failed at Chromium's macOS Mach-port launch restriction before page load, so 320/390px visual review, installed PWA, and deployed restart tests remain open.

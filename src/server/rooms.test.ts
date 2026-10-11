@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { RoomService } from './rooms.js';
 import type { GameState } from '../shared/game.js';
+import type { RoomSnapshot, RoomStore } from './room-store.js';
 
 function setup() {
   const states: Parameters<ConstructorParameters<typeof RoomService>[0]>[2][] = [];
@@ -52,13 +53,109 @@ test('leaving a lobby removes the member cleanly', () => {
   assert.throws(() => service.state(session), /session is no longer valid/i);
 });
 
-test('disconnecting host transfers control to a connected human', () => {
+test('disconnecting host pauses the table until connected players consent', () => {
   const { service, session, socket } = setup();
   const guestSocket = { id: `guest-${Math.random()}`, join: () => undefined } as unknown as Parameters<RoomService['join']>[0];
   const guest = service.join(guestSocket, session.roomCode, 'Guest');
   service.disconnect(socket.id);
+  assert.equal(service.state(guest).migration?.candidateId, guest.playerId);
+  assert.equal(service.state(guest).canStart, false);
+  assert.throws(() => service.start(guest), /paused/i);
+  service.decideHostMigration(guest, true);
+  assert.equal(service.state(guest).migration, undefined);
   assert.equal(service.state(guest).players.find(player => player.id === guest.playerId)?.host, true);
   assert.equal(service.state(guest).canStart, true);
+  service.restore(socket, session);
+  assert.equal(service.state(guest).players.find(player => player.id === guest.playerId)?.host, true);
+});
+
+test('host returning before consent resumes with the same host', () => {
+  const { service, session, socket } = setup();
+  const guestSocket = { id: `guest-${Math.random()}`, join: () => undefined } as unknown as Parameters<RoomService['join']>[0];
+  const guest = service.join(guestSocket, session.roomCode, 'Guest');
+  service.start(session);
+  service.disconnect(socket.id);
+  assert.equal(service.state(guest).migration?.candidateId, guest.playerId);
+  service.restore(socket, session);
+  assert.equal(service.state(session).migration, undefined);
+  assert.equal(service.state(session).players.find(player => player.id === session.playerId)?.host, true);
+});
+
+test('all connected people must agree before host control moves', () => {
+  const { service, session, socket } = setup();
+  const guestSocket = { id: `guest-${Math.random()}`, join: () => undefined } as unknown as Parameters<RoomService['join']>[0];
+  const thirdSocket = { id: `third-${Math.random()}`, join: () => undefined } as unknown as Parameters<RoomService['join']>[0];
+  const guest = service.join(guestSocket, session.roomCode, 'Guest');
+  const third = service.join(thirdSocket, session.roomCode, 'Third');
+  service.start(session);
+  service.disconnect(socket.id);
+  const before = service.state(guest).game;
+  service.decideHostMigration(guest, true);
+  assert.equal(service.state(guest).migration?.approvedIds.length, 1);
+  assert.throws(() => service.nextRound(guest), /paused/i);
+  service.decideHostMigration(third, false);
+  assert.equal(service.state(guest).migration?.approvedIds.length, 1);
+  service.decideHostMigration(third, true);
+  assert.equal(service.state(guest).migration, undefined);
+  assert.equal(service.state(guest).players.find(player => player.id === guest.playerId)?.host, true);
+  assert.equal(service.state(guest).game?.round, before?.round);
+  assert.deepEqual(service.state(guest).game?.players.map(player => player.tokens), before?.players.map(player => player.tokens));
+});
+
+test('saved room restores private state and seats after a server restart', async () => {
+  const snapshots = new Map<string, RoomSnapshot>();
+  const store: RoomStore = {
+    load: async () => [...snapshots.values()].map(snapshot => structuredClone(snapshot)),
+    save: async snapshot => { snapshots.set(snapshot.code, structuredClone(snapshot)); },
+    remove: async code => { snapshots.delete(code); }
+  };
+  const socket = { id: `store-${Math.random()}`, join: () => undefined } as unknown as Parameters<RoomService['create']>[0];
+  const service = new RoomService(() => undefined, store);
+  const session = service.create(socket, 'Host');
+  service.addBot(session);
+  service.start(session);
+  const hand = service.state(session).game?.hand;
+  await service.flush();
+
+  const restarted = new RoomService(() => undefined, store);
+  await restarted.load();
+  const returningSocket = { id: `return-${Math.random()}`, join: () => undefined } as unknown as Parameters<RoomService['restore']>[0];
+  assert.deepEqual(restarted.restore(returningSocket, session), session);
+  assert.deepEqual(restarted.state(session).game?.hand, hand);
+  assert.equal(restarted.state(session).migration, undefined);
+  await restarted.flush();
+});
+
+test('new host can resolve a disconnected turn and keep the match moving', () => {
+  const { service, session, socket } = setup();
+  const guestSocket = { id: `guest-${Math.random()}`, join: () => undefined } as unknown as Parameters<RoomService['join']>[0];
+  const guest = service.join(guestSocket, session.roomCode, 'Guest');
+  service.start(session);
+  const room = (service as unknown as { get(code: string): { game: GameState } }).get(session.roomCode);
+  room.game.turnIndex = room.game.players.findIndex(player => player.id === session.playerId);
+  service.disconnect(socket.id);
+  assert.throws(() => service.forfeitDisconnectedTurn(guest), /paused/i);
+  service.decideHostMigration(guest, true);
+  service.forfeitDisconnectedTurn(guest);
+  assert.equal(service.state(guest).game?.phase, 'round-over');
+  service.nextRound(guest);
+  assert.equal(service.state(guest).game?.round, 2);
+});
+
+test('host migration works while a round result is awaiting the next deal', () => {
+  const { service, session, socket } = setup();
+  const guestSocket = { id: `guest-${Math.random()}`, join: () => undefined } as unknown as Parameters<RoomService['join']>[0];
+  const guest = service.join(guestSocket, session.roomCode, 'Guest');
+  service.start(session);
+  const room = (service as unknown as { get(code: string): { game: GameState } }).get(session.roomCode);
+  room.game.phase = 'round-over';
+  service.disconnect(socket.id);
+  service.decideHostMigration(guest, true);
+  service.nextRound(guest);
+  assert.equal(service.state(guest).game?.round, 2);
+  room.game.phase = 'match-over';
+  service.disconnect(guestSocket.id);
+  assert.ok(service.state(session).migration);
 });
 
 test('reactions are bounded and visible to the room', () => {

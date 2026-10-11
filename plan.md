@@ -1,7 +1,7 @@
 # Plan
 
-- Goal: make round and match results immediately understandable and rewarding.
-- Scope: result heading, awards, final card reveal, timeline, and post-round desktop layout.
-- Approach: use viewer-relative winner labels, compact scorecards and card comparisons, structured event rows, and a stacked post-round sidebar.
-- Risks: ties, match winner differing from round winner, long player names, and responsive overflow.
-- Verification: tests, build, diff check, and source inspection of mobile and desktop states. Browser visual QA remains unavailable by prior user choice.
+- Goal: meet the arcade handoff for display names, host loss, and match recovery.
+- Scope: URL name hint, hosted room pause/consent/transfer, durable room snapshots, offline solo, connection UI, and relevant documentation.
+- Approach: preserve the authoritative room service, add a migration state and PostgreSQL snapshots loaded before accepting traffic; use the shared rules engine for a browser-local solo case when the server is unavailable.
+- Risks: concurrent writes, restart during a turn, old seats reconnecting, and hosted storage availability.
+- Verification: targeted tests for name parsing, migration across phases, snapshot reload, and offline solo; full tests/build; local browser flow where possible. Live Render and device checks require the deployed environment.
