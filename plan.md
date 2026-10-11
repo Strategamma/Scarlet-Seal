@@ -1,7 +1,7 @@
 # Plan
 
-- Goal: make hand cards readable and satisfying on narrow touch screens and desktop.
-- Scope: card hierarchy, selected/review/locked states, choice focus, and duplicate-submit feedback.
-- Approach: keep the existing DOM and rules; give value, name, effect, and action distinct areas; preserve full rule text for assistive tech; make decision transitions focus the next control.
-- Risks: long card names and effects at 320px, forced-play badges, reduced-motion behavior, and unavailable browser visual QA.
-- Verification: tests, build, diff check, source review of card states and responsive CSS.
+- Goal: make Case Review a single, obvious choice and reduce mobile card crowding.
+- Scope: private keep/return selection and its responsive card layout.
+- Approach: tap one card to keep, derive the cards returned from that choice, show both outcomes on the cards, and keep the authoritative return action unchanged.
+- Risks: duplicate-value cards, deck-shortened reviews, and unavailable browser visual QA.
+- Verification: relevant tests, build, diff check, and source review of the 2- and 3-card states.
