@@ -36,8 +36,27 @@ test('player views never reveal an opponent hand', () => {
   assert.equal(view.players.find(p => p.id === 'b')?.handCount, 1);
   assert.equal('hand' in (view.players.find(p => p.id === 'b') as object), false);
   assert.deepEqual(view.players.find(p => p.id === 'b')?.discards, [0, 2, 4]);
-  assert.equal(view.removedCount, 3);
+  assert.equal(view.removedCount, 0);
   assert.equal('faceUpRemoved' in view, false);
+});
+
+test('two-player rounds use the full deck except one private reserve', () => {
+  const state = game();
+  assert.equal(state.deck.length, 17);
+  assert.equal(state.setAside !== undefined, true);
+});
+
+test('higher surviving card wins the round, even when a bonus seal wins the match', () => {
+  const state = game(); setTurn(state, [0, 3], 4);
+  state.deck = [];
+  state.players[0].tokens = 2;
+  playCard(state, 'a', { card: 0 }, () => 0);
+  assert.deepEqual(state.winnerIds, ['b']);
+  assert.deepEqual(state.roundSummary?.reveals, [{ playerId: 'a', card: 3 }, { playerId: 'b', card: 4 }]);
+  assert.deepEqual(state.roundSummary?.awards, [{ playerId: 'b', source: 'round' }, { playerId: 'a', source: 'wiretap' }]);
+  assert.equal(state.players[0].tokens, 3);
+  assert.equal(state.players[1].tokens, 1);
+  assert.deepEqual(state.matchWinnerIds, ['a']);
 });
 
 test('Wiretap has no immediate effect and finishes the turn normally', () => {

@@ -133,7 +133,7 @@ export class RoomService {
       return;
     }
     room.members = room.members.filter(candidate => candidate.id !== member.id);
-    if (!room.members.length) {
+    if (!room.members.some(candidate => !candidate.bot)) {
       rooms.delete(room.code);
       if (this.store) this.pending = this.pending.then(() => this.store!.remove(room.code)).catch(error => {
         this.storeError = error instanceof Error ? error : new Error('Could not remove the table.');
@@ -151,6 +151,8 @@ export class RoomService {
     if (room.hostId !== member.id) throw new Error('Only the host can start.');
     if (room.game) throw new Error('This game has already started.');
     if (room.members.length < 2) throw new Error('Add a bot or wait for another player.');
+    room.members = room.members.filter(player => player.bot || player.connected);
+    if (room.members.length < 2) this.addBotMember(room);
     room.game = createGame(room.members.map(m => ({ id: m.id, name: m.name, bot: m.bot })));
     this.push(room); this.scheduleBot(room);
   }
@@ -241,7 +243,7 @@ export class RoomService {
 
   availableRooms(): AvailableRoom[] {
     return [...rooms.values()]
-      .filter(room => !room.game && room.members.length < MAX_PLAYERS && room.members.some(member => !member.bot))
+      .filter(room => !room.game && !room.migration && room.members.length < MAX_PLAYERS && room.members.some(member => member.id === room.hostId && member.connected))
       .map(room => ({
         code: room.code,
         hostName: room.members.find(member => member.id === room.hostId)?.name ?? 'Unknown host',

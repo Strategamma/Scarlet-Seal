@@ -78,7 +78,7 @@ export function startRound(state: GameState, rng = Math.random): void {
   state.round += 1; state.phase = 'playing'; state.winnerIds = []; state.matchWinnerIds = []; state.privateNotice = {}; state.pendingBottom = undefined; state.lastAction = undefined; state.publicActions = []; state.roundSummary = undefined;
   state.players.forEach(p => { p.hand = []; p.discards = []; p.protected = false; p.eliminated = false; });
   const deck = shuffle(makeDeck(), rng);
-  state.setAside = deck.pop(); state.faceUpRemoved = state.players.length === 2 ? deck.splice(-3) : [];
+  state.setAside = deck.pop(); state.faceUpRemoved = [];
   state.players.forEach(p => p.hand.push(deck.pop()!));
   state.deck = deck;
   const previousWinner = state.players.findIndex(p => p.id === previousWinnerId);

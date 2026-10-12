@@ -72,3 +72,16 @@ Original prompt: I want to build a mobile PWA game based on the board game love 
 - Host loss now pauses the room until connected humans agree to deterministic transfer. A returning former host keeps the seat without reclaiming control; the new host can resolve an absent player's turn by forfeiting that round.
 - PostgreSQL room snapshots load before server startup and preserve seats, private hands, phase, scores, and reconnect tokens across web-service restarts. Render Blueprint now provisions a database; local development works without one. Socket reconnect auth now follows newly issued sessions.
 - Verification: 50 tests and build pass, including snapshot reload, migration votes, round transition, and offline solo. Required Playwright run failed at Chromium's macOS Mach-port launch restriction before page load, so 320/390px visual review, installed PWA, and deployed restart tests remain open.
+
+## Built-in browser QA attempt (2026-10-12)
+
+- Started the local Vite client and attempted to open `http://localhost:5173/` in the built-in browser. Browser Use rejected it under a saved user permission policy and explicitly prohibited browser or automation workarounds. No visual gameplay QA was possible.
+- Source review found that rerendering a round result or match finale restarted flip and confetti effects. Result animations now run once per round/match and leave revealed cards face up during later updates.
+- Verification: 52 tests pass, production build passes, diff check clean. TODO: test mobile play, round reveals, and match finale visually once browser access is permitted.
+
+## Non-browser bug bash (2026-10-12)
+
+- Fixed offline solo leave confirmation leaving the home screen inert; cleared the dialog state before rendering home.
+- Hid lobbies whose host is offline from public listings. Starting a lobby now drops disconnected guests and fills an empty second seat with a bot; the start screen explains this. Empty human-free lobbies are removed instead of retaining bots indefinitely.
+- Ran 500 seeded complete matches across 2–6 seats (24,944 actions), checking all 21 cards remained accounted for after every action. Added room lifecycle regressions. All 54 tests and the production build pass.
+- TODO: visually playtest touch layout, dialog exit, card reveal, and match finale when built-in browser access permits localhost.

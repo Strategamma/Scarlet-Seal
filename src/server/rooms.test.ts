@@ -46,11 +46,36 @@ test('available rooms expose only safe summaries for joinable lobbies', () => {
   assert.equal(service.availableRooms().some(room => room.code === session.roomCode), false);
 });
 
+test('a lobby disappears from public listings while its host is unavailable', () => {
+  const { service, session, socket } = setup();
+  service.addBot(session);
+  assert.equal(service.availableRooms().some(room => room.code === session.roomCode), true);
+  service.disconnect(socket.id);
+  assert.equal(service.availableRooms().some(room => room.code === session.roomCode), false);
+  service.restore(socket, session);
+  assert.equal(service.availableRooms().some(room => room.code === session.roomCode), true);
+});
+
+test('starting a lobby replaces an absent guest instead of trapping the first turn', () => {
+  const { service, session } = setup();
+  const guestSocket = { id: `absent-${Math.random()}`, join: () => undefined } as unknown as Parameters<RoomService['join']>[0];
+  const guest = service.join(guestSocket, session.roomCode, 'Guest');
+  service.disconnect(guestSocket.id);
+  service.start(session);
+  const view = service.state(session);
+  assert.equal(view.game?.players.length, 2);
+  assert.equal(view.game?.players.some(player => player.bot), true);
+  assert.equal(view.game?.players.some(player => player.id === guest.playerId), false);
+  assert.equal(view.game?.players.every(player => player.connected), true);
+});
+
 test('leaving a lobby removes the member cleanly', () => {
   const { service, session } = setup();
   service.addBot(session);
   service.leave(session);
-  assert.throws(() => service.state(session), /session is no longer valid/i);
+  assert.throws(() => service.state(session), /room not found/i);
+  const laterSocket = { id: `later-${Math.random()}`, join: () => undefined } as unknown as Parameters<RoomService['join']>[0];
+  assert.throws(() => service.join(laterSocket, session.roomCode, 'Later'), /room not found/i);
 });
 
 test('disconnecting host pauses the table until connected players consent', () => {
