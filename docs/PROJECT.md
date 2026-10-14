@@ -6,7 +6,7 @@ Original detective-themed, phone-first deduction card PWA. Canonical source: `ht
 
 ## Architecture
 
-TypeScript, Vite, Express, Socket.IO, PostgreSQL; Node 20+. `src/shared/` owns deterministic rules (injectable RNG), cards and protocol. Server owns authoritative state and redacted views. `src/server/` coordinates rooms, queued PostgreSQL snapshots, reconnects and bots. `src/client/` renders accessible DOM cards; `local-solo.ts` runs the shared rules offline with browser saves. `public/` contains existing wax-seal icons and active card artwork. Keep one web instance for live coordination. PostgreSQL recovers rooms after restarts; without `DATABASE_URL`, local rooms are memory-only. JSON snapshots accept older rows without readiness fields.
+TypeScript, Vite, Express, Socket.IO, optional PostgreSQL; Node 20+. `src/shared/` owns deterministic rules (injectable RNG), cards and protocol. Server owns authoritative state and redacted views. `src/server/` coordinates rooms, queued PostgreSQL snapshots, reconnects and bots. `src/client/` renders accessible DOM cards; `local-solo.ts` runs the shared rules offline with browser saves. `public/` contains existing wax-seal icons and active card artwork. Keep one web instance for live coordination. PostgreSQL recovers rooms after restarts; without `DATABASE_URL`, rooms on all hosts (including Render) are memory-only and lost on restarts/redeploys. JSON snapshots accept older rows without readiness fields.
 
 Commands: `npm run dev`, `npm test`, `npm run build`, `npm start`. Production requires HTTPS and WebSocket proxying. `PORT` controls the server port.
 
@@ -24,4 +24,4 @@ Lobby humans explicitly ready before starting; host/bots start ready. Existing a
 
 Retain offline solo, reactions, first-round tips, card inspections and rich results. Preferences store sound, quiet motion and optional haptics. Sound preserves existing on/off settings and uses gesture-unlocked synthesis/master mute. System reduced motion always applies; finale can be skipped. Modals isolate focus/input; render preserves form focus/caret and choices.
 
-Production: `https://scarlet-seal.onrender.com/`, Render web service/PostgreSQL in Singapore. Free database expiry/backups remain operational limitations. Local integration is not deployed; see `docs/EXPERIENCE_VERIFICATION.md` for evidence and limits.
+Production: `https://scarlet-seal.onrender.com/`, Render web service in Singapore. Blueprint provisions no SQL database; persistence can be enabled later with `DATABASE_URL`. Local integration is not deployed; see `docs/EXPERIENCE_VERIFICATION.md` for evidence and limits.

@@ -24,16 +24,16 @@ PORT=3000 npm start
 
 Point `decadenceinc.com` (or a game subdomain) to the host and reverse-proxy HTTPS traffic to port 3000. The proxy must support WebSocket upgrades for `/socket.io/`. HTTPS is required for reliable PWA installation. `GET /health` is available for health checks.
 
-Set `DATABASE_URL` to a PostgreSQL connection string to preserve active rooms across server restarts. The server loads saved rooms before accepting connections; returning players reclaim their seats with their saved session tokens. Without `DATABASE_URL`, local development keeps rooms in memory only. Keep one web instance: room coordination still happens in that instance.
+Set `DATABASE_URL` to a PostgreSQL connection string to preserve active rooms across server restarts. The server loads saved rooms before accepting connections; returning players reclaim their seats with their saved session tokens. Without `DATABASE_URL`, all hosting—including Render—keeps rooms in memory only; restarts and redeploys clear rooms and active matches. Keep one web instance: room coordination still happens in that instance.
 
 ### Render
 
-The repository includes `render.yaml` for one Docker web service and a PostgreSQL database in Render's Singapore region. The database stores complete authoritative room snapshots, including private hands and reconnect tokens. The service uses `/health` for health checks and declares `scarletseal.decadenceinc.com` as its custom domain. Render's free PostgreSQL plan expires and has no backups; move the database to a durable plan before relying on long-term availability.
+The repository includes `render.yaml` for one Docker web service in Render's Singapore region. No SQL database is required. Rooms live in memory and reset on server restarts or redeploys. Optional PostgreSQL persistence can be enabled later by setting `DATABASE_URL`. The service uses `/health` for health checks and declares `scarletseal.decadenceinc.com` as its custom domain.
 
 After the GitHub repository is pushed:
 
 1. In Render, create a new Blueprint from `Strategamma/Scarlet-Seal`.
-2. Approve the `scarlet-seal` web service and `scarlet-seal-db` database.
+2. Approve the `scarlet-seal` web service.
 3. In the DNS provider for `decadenceinc.com`, add the CNAME value shown by Render for `scarletseal`.
 4. Wait for Render to verify the domain and issue TLS.
 
@@ -53,7 +53,7 @@ npm run build
 
 **Host a table** opens in one tap with a saved or suggested nickname; choosing another name is optional. Invitation links join directly once saved-seat restoration settles. Existing seats are preserved until you deliberately leave. Manual code entry supports Enter. Guests mark **I'm ready** before the host starts; bots/hosts start ready. Finished groups can rematch immediately, skip to final results, or **Invite more friends** to reopen the same lobby and reset readiness.
 
-The **Over the internet** and **Same network** tabs explain connection requirements; they do not switch servers or discover nearby devices. A local server must be installed/running, and friends must open its reachable LAN IP/port. Never send another device a localhost link. Shared or guest Wi-Fi can block access. Internet play requires a publicly reachable game server. The existing PostgreSQL recovery and consent-based host transfer remain in place; there is no automatic 30-second eviction.
+The **Over the internet** and **Same network** tabs explain connection requirements; they do not switch servers or discover nearby devices. A local server must be installed/running, and friends must open its reachable LAN IP/port. Never send another device a localhost link. Shared or guest Wi-Fi can block access. Internet play requires a publicly reachable game server. PostgreSQL restart recovery is optional; consent-based host transfer works while the server is running; there is no automatic 30-second eviction.
 
 Preferences control sound, quiet motion and optional supported haptics. System reduced motion always applies. Help/preferences isolate input but do not pause multiplayer. The illustrated card atlas remains cached because this canonical version uses it, including offline solo.
 

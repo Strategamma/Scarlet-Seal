@@ -10,7 +10,6 @@ import { PostgresRoomStore } from './room-store.js';
 const app = express();
 const httpServer = createServer(app);
 const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, { cors: { origin: true } });
-if (process.env.RENDER && !process.env.DATABASE_URL) throw new Error('DATABASE_URL is required on Render to recover active rooms.');
 const service = new RoomService((socketId, event, data) => io.to(socketId).emit(event, data), process.env.DATABASE_URL ? new PostgresRoomStore(process.env.DATABASE_URL) : undefined);
 await service.load();
 const dist = resolve(dirname(fileURLToPath(import.meta.url)), '../../dist');
