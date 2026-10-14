@@ -27,7 +27,7 @@ export class LocalSolo {
   view(): RoomView {
     return {
       code: 'SOLO',
-      players: this.game.players.map(player => ({ id: player.id, name: player.name, bot: player.bot, connected: true, host: player.id === HUMAN_ID })),
+      players: this.game.players.map(player => ({ id: player.id, name: player.name, bot: player.bot, connected: true, host: player.id === HUMAN_ID, ready: true })),
       game: viewFor(this.game, HUMAN_ID), canStart: false
     };
   }

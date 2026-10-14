@@ -17,3 +17,6 @@ Scarlet Seal belongs to Decadence Inc.: dark grid, coral/scarlet, amber, bold sa
 - Animate actual state changes once: draw, play, discard, handoff, elimination, protection, and seal. Respect reduced motion.
 - Mobile at 320–520px must avoid overlap and keep two hand cards legible; desktop separates shared board and personal choices. Non-card controls need 44px touch targets.
 - Newcomer testing is the quality gate: observe people starting, taking turns, reading outcomes, using back/leave, and explaining how they won without help.
+
+## Canonical experience integration
+Keep current dark-grid arcade styling, card artwork, teaching, reactions and result reveals. Extend through `experience.css`. Host uses optional saved/suggested identity; invites autojoin only after restoration settles. Connection tabs explain requirements rather than pretending to select transports. Ready/start lead the lobby; links lead sharing. Keep consent-based host transfer and persistent seats, not automatic timeout eviction. Preserve offline solo and existing sound settings; add master mute, quiet motion and optional haptics. Prefer SVG control symbols and readable status text. Confirm the nested Git root before any future edits.

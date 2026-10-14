@@ -1,6 +1,6 @@
 import type { CardValue, GameView, Move } from './game.js';
 
-export interface LobbyPlayer { id: string; name: string; bot: boolean; connected: boolean; host: boolean }
+export interface LobbyPlayer { id: string; name: string; bot: boolean; connected: boolean; host: boolean; ready: boolean }
 export interface Reaction { sequence: number; playerId: string; text: 'Suspicious' | 'Nice try' | 'Case closed' }
 export interface HostMigration { formerHostId: string; candidateId?: string; approvedIds: string[] }
 export interface RoomView { code: string; players: LobbyPlayer[]; game?: GameView; canStart: boolean; reaction?: Reaction; migration?: HostMigration }
@@ -11,6 +11,8 @@ export interface ClientToServerEvents {
   'room:create': (name: string, callback: (result: Result<Session>) => void) => void;
   'room:join': (input: { code: string; name: string }, callback: (result: Result<Session>) => void) => void;
   'rooms:list': (callback: (result: Result<AvailableRoom[]>) => void) => void;
+  'room:ready': (ready: boolean, callback: (result: Result<true>) => void) => void;
+  'room:return-lobby': (callback: (result: Result<true>) => void) => void;
   'room:resume': (callback: (result: Result<true>) => void) => void;
   'room:react': (text: Reaction['text'], callback: (result: Result<true>) => void) => void;
   'room:host-decision': (continueGame: boolean, callback: (result: Result<true>) => void) => void;

@@ -1,29 +1,27 @@
 # Scarlet Seal
 
-Scarlet Seal is an original detective-themed, mobile-first, installable deduction card game. The repository is a TypeScript monorepo-shaped app without workspace complexity: Vite serves the client, Express serves production assets, and Socket.IO carries lobby/game events.
+Original detective-themed, phone-first deduction card PWA. Canonical source: `https://github.com/Strategamma/Scarlet-Seal`, branch `main`.
 
-Canonical source: `https://github.com/Strategamma/Scarlet-Seal`, branch `main`.
-Canonical local repository: `/Users/farzan/Documents/Codex/Scarlet Seal/Scarlet-Seal`. Make all project edits and run all Git commands from this nested folder; the similarly named parent folder is not the GitHub repository.
+**Canonical local repository: `/Users/farzan/Documents/Codex/Scarlet Seal/Scarlet-Seal`. Run all edits/builds/Git commands there. The outer directory is a container; its duplicate game source/package/build were deleted. Never recreate them.**
 
 ## Architecture
 
-- `src/shared/`: pure rules, protocol types, and card definitions. The server is authoritative; clients receive redacted views only.
-- `src/server/`: authoritative in-memory room registry, PostgreSQL snapshots, Socket.IO handlers, reconnect support, and bot turns.
-- `src/client/`: DOM UI and Socket.IO client. Offline solo uses the shared rules engine and browser storage. No canvas engine.
-- `public/`: PWA manifest and static artwork.
+TypeScript, Vite, Express, Socket.IO, PostgreSQL; Node 20+. `src/shared/` owns deterministic rules (injectable RNG), cards and protocol. Server owns authoritative state and redacted views. `src/server/` coordinates rooms, queued PostgreSQL snapshots, reconnects and bots. `src/client/` renders accessible DOM cards; `local-solo.ts` runs the shared rules offline with browser saves. `public/` contains existing wax-seal icons and active card artwork. Keep one web instance for live coordination. PostgreSQL recovers rooms after restarts; without `DATABASE_URL`, local rooms are memory-only. JSON snapshots accept older rows without readiness fields.
 
-Brand direction follows decadenceinc.com: dark grid, scarlet/coral, amber, and bold sans. The circular wax-seal logo is canonical. Hand cards prioritize HTML value, name, effect, and count over artwork. Avoid royal, courtly, or fantasy likenesses.
+Commands: `npm run dev`, `npm test`, `npm run build`, `npm start`. Production requires HTTPS and WebSocket proxying. `PORT` controls the server port.
 
-Rooms use short join codes over the deployed origin or a LAN URL. PostgreSQL snapshots recover rooms after a server restart; one web instance remains required for live coordination. Tables contain 2–6 seats in any human/bot mix, with at least one human.
+## Identity and rules
 
-## Rules and conventions
+Follow decadenceinc.com: dark grid, scarlet/coral, amber, bold sans; warm-paper cards and canonical wax seal. Preserve HTML values/effects/counts and existing artwork. Avoid fantasy/courtly imagery. `experience.css` extends current styles without replacing the table/card renderer. The illustrated atlas is actively used and remains precached.
 
-The 21-card deck uses values 0–9 and original detective names. One card is reserved privately each round; two-player rounds use the rest of the deck for longer play. Wiretap grants a bonus seal to its sole surviving user; Case Review privately draws up to two cards and returns the same number to the deck. Every table requires exactly three seals to win. Played, effect-discarded, and elimination-discarded cards are public; hands, the reserved card, and Case Review returns stay private. Game logic must remain deterministic under an injected RNG.
+21 cards, values 0–9, one private reserve. Two-player rounds use the remaining deck for longer play. Exactly three seals win. Wiretap bonuses and private Case Review keep existing rules. Hands, reserve and returned cards stay private; played/discarded cards are public. Rules modules must remain deterministic and unchanged by UI work.
 
-Use Node 20+. Commands: `npm run dev`, `npm test`, `npm run build`, `npm start`. Production expects a reverse proxy with WebSocket upgrades and HTTPS. Set `PORT` as needed.
+## Player experience and networking
 
-Production: `https://scarlet-seal.onrender.com/`, one Render Docker web service plus PostgreSQL in Singapore via `render.yaml`. Target custom domain: `scarletseal.decadenceinc.com`. Free PostgreSQL expires and lacks backups; a durable plan is needed for long-term recovery.
+One-tap host uses a saved/suggested nickname; names remain editable. Valid invitations autojoin after saved-seat restoration settles. Saved game names take priority over the arcade fragment hint, which is consumed/removed and never authenticates players. Local/internet tabs explain requirements; they do not discover devices or switch servers. Everyone needs the same origin. Offline LAN requires an installed, running host server and reachable LAN address/port; shared Wi-Fi may be isolated.
 
-## Current state
+Lobby humans explicitly ready before starting; host/bots start ready. Existing absent-seat bot replacement remains. Finished groups can rematch immediately or reopen a lobby with readiness reset. Host loss **pauses** play; unanimous connected-human consent transfers hosting deterministically. Returning former hosts keep their seat without reclaiming control. Hosts can forfeit disconnected turns for a round. No automatic 30-second eviction replaces this persistence policy. Latest restored socket owns a seat; duplicate create/join requests are rejected.
 
-Live playable game: one-tap solo, offline solo on a cached PWA, code-based rooms, configurable bots, authenticated seat resume, complete card actions, reactions, scoring, and rematches. The arcade display-name fragment is an editable hint used only when no game name is saved. Host loss pauses the table; unanimous consent from connected humans transfers control to the first eligible seat, while the former host retains their seat. A host may resolve a disconnected player's turn by forfeiting that player for the round. The table shows seats, turn, last play, public discards, and hand. In-table round reveals separate round wins from bonus seals; match wins have a finale. First-round tips, optional sound, accessible dialogs, and reduced-motion support are present. Quality milestones live in `docs/GAMEPLAY_ROADMAP.md`.
+Retain offline solo, reactions, first-round tips, card inspections and rich results. Preferences store sound, quiet motion and optional haptics. Sound preserves existing on/off settings and uses gesture-unlocked synthesis/master mute. System reduced motion always applies; finale can be skipped. Modals isolate focus/input; render preserves form focus/caret and choices.
+
+Production: `https://scarlet-seal.onrender.com/`, Render web service/PostgreSQL in Singapore. Free database expiry/backups remain operational limitations. Local integration is not deployed; see `docs/EXPERIENCE_VERIFICATION.md` for evidence and limits.

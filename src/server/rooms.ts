@@ -5,7 +5,7 @@ import type { AvailableRoom, ClientToServerEvents, HostMigration, Reaction, Room
 import type { RoomSnapshot, RoomStore } from './room-store.js';
 
 type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
-interface Member { id: string; token: string; name: string; bot: boolean; connected: boolean; socketId?: string }
+interface Member { id: string; token: string; name: string; bot: boolean; connected: boolean; ready: boolean; socketId?: string }
 interface Room { code: string; hostId: string; members: Member[]; game?: GameState; botTimer?: NodeJS.Timeout; reaction?: Reaction; reactionSequence: number; migration?: HostMigration }
 
 const rooms = new Map<string, Room>();
@@ -21,6 +21,7 @@ function roomCode(): string {
   } while (true);
 }
 function safeName(value: string): string {
+  if (typeof value !== 'string') throw new Error('Enter a detective name.');
   const name = value.trim().replace(/\s+/g, ' ').slice(0, 20);
   if (!name) throw new Error('Enter a name.');
   return name;
@@ -36,7 +37,7 @@ export class RoomService {
     for (const snapshot of await this.store.load()) {
       const room: Room = {
         ...snapshot,
-        members: snapshot.members.map(member => ({ ...member, connected: member.bot })),
+        members: snapshot.members.map(member => ({ ...member, connected: member.bot, ready: member.ready ?? (member.bot || member.id === snapshot.hostId) })),
       };
       room.game?.players.forEach(player => { if (!player.bot) player.connected = false; });
       room.migration = undefined;
@@ -54,7 +55,7 @@ export class RoomService {
     if (!this.store) return;
     const snapshot: RoomSnapshot = {
       code: room.code, hostId: room.hostId,
-      members: room.members.map(({ id, token, name, bot }) => ({ id, token, name, bot })),
+      members: room.members.map(({ id, token, name, bot, ready }) => ({ id, token, name, bot, ready })),
       game: room.game ? structuredClone(room.game) : undefined,
       reaction: room.reaction, reactionSequence: room.reactionSequence,
       migration: room.migration ? structuredClone(room.migration) : undefined
@@ -70,7 +71,7 @@ export class RoomService {
 
   create(socket: GameSocket, rawName: string): Session {
     this.requireStore();
-    const member: Member = { id: id(), token: token(), name: safeName(rawName), bot: false, connected: true, socketId: socket.id };
+    const member: Member = { id: id(), token: token(), name: safeName(rawName), bot: false, connected: true, ready: true, socketId: socket.id };
     const room: Room = { code: roomCode(), hostId: member.id, members: [member], reactionSequence: 0 };
     rooms.set(room.code, room); socket.join(room.code); this.push(room);
     return { roomCode: room.code, playerId: member.id, token: member.token };
@@ -79,17 +80,17 @@ export class RoomService {
   join(socket: GameSocket, rawCode: string, rawName: string): Session {
     this.requireStore();
     const room = this.get(rawCode);
-    if (room.game) throw new Error('This game has already started.');
-    if (room.members.length >= MAX_PLAYERS) throw new Error('This room is full.');
+    if (room.game) throw new Error('This table is playing. Ask the host to reopen the lobby when the match ends.');
+    if (room.members.length >= MAX_PLAYERS) throw new Error('This room is full. Ask the host to free a seat or host your own table.');
     const name = safeName(rawName);
-    if (room.members.some(m => m.name.toLowerCase() === name.toLowerCase())) throw new Error('That name is already taken.');
-    const member: Member = { id: id(), token: token(), name, bot: false, connected: true, socketId: socket.id };
+    if (room.members.some(m => m.name.toLowerCase() === name.toLowerCase())) throw new Error('That name is already at this table. Choose another name.');
+    const member: Member = { id: id(), token: token(), name, bot: false, connected: true, ready: false, socketId: socket.id };
     room.members.push(member); socket.join(room.code); this.refreshMigration(room); this.push(room);
     return { roomCode: room.code, playerId: member.id, token: member.token };
   }
 
   restore(socket: GameSocket, session?: Partial<Session>): Session | undefined {
-    if (!session?.roomCode || !session.playerId || !session.token) return;
+    if (typeof session?.roomCode !== 'string' || typeof session.playerId !== 'string' || typeof session.token !== 'string') return;
     const room = rooms.get(session.roomCode.toUpperCase());
     const member = room?.members.find(m => m.id === session.playerId && m.token === session.token && !m.bot);
     if (!room || !member) return;
@@ -102,11 +103,33 @@ export class RoomService {
     return { roomCode: room.code, playerId: member.id, token: member.token };
   }
 
+  isCurrent(session: Session, socketId: string): boolean {
+    const { member } = this.authenticate(session);
+    return member.connected && member.socketId === socketId;
+  }
+
+  ready(session: Session, ready: boolean): void {
+    const { room, member } = this.authenticate(session);
+    this.requireActive(room);
+    if (room.game) throw new Error('Readiness is only changed in the lobby.');
+    member.ready = ready === true; this.push(room);
+  }
+
+  returnLobby(session: Session): void {
+    const { room, member } = this.authenticate(session);
+    this.requireActive(room);
+    if (room.hostId !== member.id || room.game?.phase !== 'match-over') throw new Error('Only the host can reopen a completed table.');
+    clearTimeout(room.botTimer); room.botTimer = undefined; room.game = undefined; room.reaction = undefined;
+    room.members = room.members.filter(player => player.bot || player.connected);
+    for (const player of room.members) player.ready = player.bot || player.id === room.hostId;
+    this.push(room);
+  }
+
   addBot(session: Session): void {
     const { room, member } = this.authenticate(session);
     if (room.hostId !== member.id) throw new Error('Only the host can add a bot.');
     if (room.game) throw new Error('The game has already started.');
-    if (room.members.length >= MAX_PLAYERS) throw new Error('This room is full.');
+    if (room.members.length >= MAX_PLAYERS) throw new Error('This room is full. Ask the host to free a seat or host your own table.');
     this.addBotMember(room);
     this.push(room);
   }
@@ -151,6 +174,7 @@ export class RoomService {
     if (room.hostId !== member.id) throw new Error('Only the host can start.');
     if (room.game) throw new Error('This game has already started.');
     if (room.members.length < 2) throw new Error('Add a bot or wait for another player.');
+    if (room.members.some(player => !player.bot && player.connected && !player.ready)) throw new Error('Wait for everyone to mark ready.');
     room.members = room.members.filter(player => player.bot || player.connected);
     if (room.members.length < 2) this.addBotMember(room);
     room.game = createGame(room.members.map(m => ({ id: m.id, name: m.name, bot: m.bot })));
@@ -285,9 +309,10 @@ export class RoomService {
   private addBotMember(room: Room): void {
     const usedNames = new Set(room.members.map(existing => existing.name));
     const name = BOT_NAMES.find(candidate => !usedNames.has(candidate)) ?? `Court Bot ${room.members.filter(existing => existing.bot).length + 1}`;
-    room.members.push({ id: id(), token: token(), name, bot: true, connected: true });
+    room.members.push({ id: id(), token: token(), name, bot: true, connected: true, ready: true });
   }
   private get(code: string): Room {
+    if (typeof code !== 'string') throw new Error('Enter the five-character room code.');
     const room = rooms.get(code.trim().toUpperCase());
     if (!room) throw new Error('Room not found. Check the code and try again.');
     return room;
@@ -295,9 +320,9 @@ export class RoomService {
   private view(room: Room, playerId: string): RoomView {
     return {
       code: room.code,
-      players: room.members.map(m => ({ id: m.id, name: m.name, bot: m.bot, connected: m.connected, host: m.id === room.hostId })),
+      players: room.members.map(m => ({ id: m.id, name: m.name, bot: m.bot, connected: m.connected, host: m.id === room.hostId, ready: m.ready })),
       game: room.game ? viewFor(room.game, playerId) : undefined,
-      canStart: room.hostId === playerId && !room.game && room.members.length >= 2,
+      canStart: room.hostId === playerId && !room.game && !room.migration && room.members.length >= 2 && room.members.every(m => m.bot || !m.connected || m.ready),
       reaction: room.reaction,
       migration: room.migration ? { ...room.migration, approvedIds: [...room.migration.approvedIds] } : undefined
     };

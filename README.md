@@ -48,3 +48,13 @@ If the current turn belongs to a disconnected person, the host may wait or forfe
 npm test
 npm run build
 ```
+
+## Quick entry and preferences
+
+**Host a table** opens in one tap with a saved or suggested nickname; choosing another name is optional. Invitation links join directly once saved-seat restoration settles. Existing seats are preserved until you deliberately leave. Manual code entry supports Enter. Guests mark **I'm ready** before the host starts; bots/hosts start ready. Finished groups can rematch immediately, skip to final results, or **Invite more friends** to reopen the same lobby and reset readiness.
+
+The **Over the internet** and **Same network** tabs explain connection requirements; they do not switch servers or discover nearby devices. A local server must be installed/running, and friends must open its reachable LAN IP/port. Never send another device a localhost link. Shared or guest Wi-Fi can block access. Internet play requires a publicly reachable game server. The existing PostgreSQL recovery and consent-based host transfer remain in place; there is no automatic 30-second eviction.
+
+Preferences control sound, quiet motion and optional supported haptics. System reduced motion always applies. Help/preferences isolate input but do not pause multiplayer. The illustrated card atlas remains cached because this canonical version uses it, including offline solo.
+
+All edits/builds/Git commands belong in this nested `Scarlet-Seal` repository. The outer duplicate source/package/build were removed. See [canonical verification](docs/EXPERIENCE_VERIFICATION.md).

@@ -4,18 +4,23 @@ import { CARDS, MAX_PLAYERS, tokenTarget, type CardValue, type Move } from '../s
 import type { AvailableRoom, ClientToServerEvents, Result, RoomView, ServerToClientEvents, Session } from '../shared/protocol';
 import { cardPlayPreview, needsPlayConfirmation, turnPresentation } from './turn-presentation';
 import { gameEvents } from './game-events';
-import { isNewPersonalTurn, playTurnSound, unlockTurnSound } from './turn-cue';
+import { isNewPersonalTurn } from './turn-cue';
 import { takeArcadeName } from './arcade-name';
 import { LOCAL_SOLO_KEY, LocalSolo } from './local-solo';
 import './styles.css';
 import './redesign.css';
+import './experience.css';
+import { isLocalServer, validInvitation, joinLink } from './connection';
+import { cue, setSoundEnabled, unlockSound } from './feedback';
+import { uiIcon } from './ui-icons';
 
 declare global { interface Window { render_game_to_text: () => string; advanceTime: (ms: number) => void } }
 
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const saved = localStorage.getItem('scarlet-seal-session') ?? localStorage.getItem('royal-post-session');
 let localSolo = LocalSolo.parse(localStorage.getItem(LOCAL_SOLO_KEY));
-let session: Session | undefined = localSolo?.session ?? (saved ? JSON.parse(saved) : undefined);
+let session: Session | undefined = localSolo?.session;
+if (!session && saved) { try { session = JSON.parse(saved); } catch { localStorage.removeItem('scarlet-seal-session'); localStorage.removeItem('royal-post-session'); } }
 let room: RoomView | undefined = localSolo?.view();
 let selectedCard: CardValue | undefined;
 let selectedCardIndex: number | undefined;
@@ -24,6 +29,13 @@ let selectedGuess: CardValue | undefined;
 let selectedKeepIndex: number | undefined;
 let showFirstRoundTips = localStorage.getItem('scarlet-seal-tips-complete') !== 'yes';
 let rulesOpen = false;
+let settingsOpen = false;
+let quietMotion = localStorage.getItem('scarlet-seal-quiet-motion') === 'yes';
+let haptics = localStorage.getItem('scarlet-seal-haptics') === 'yes';
+let toast = '';
+let toastTimer: number | undefined;
+const applyMotion = () => document.documentElement.classList.toggle('quiet-motion', quietMotion);
+applyMotion();
 let leaveOpen = false;
 let modalReturnFocus = '';
 let inspectedCard: CardValue | undefined;
@@ -36,6 +48,7 @@ let drawFromIndex = 0;
 let turnChanged = false;
 let turnCue = false;
 let soundEnabled = localStorage.getItem('scarlet-seal-sound') !== 'off';
+setSoundEnabled(soundEnabled);
 let roundStarted = false;
 let resolvedAction = false;
 let newDiscardCounts = new Map<string, number>();
@@ -54,10 +67,19 @@ const arcadeName = takeArcadeName(location.hash);
 if (arcadeName.hash !== location.hash) history.replaceState(history.state, '', location.pathname + location.search + arcadeName.hash);
 let landingName = localStorage.getItem('scarlet-seal-name') || arcadeName.name || '';
 let landingCode = new URLSearchParams(location.search).get('room')?.toUpperCase() ?? '';
+let invitationPending = validInvitation(landingCode);
+const localServer = isLocalServer(location.hostname);
+let connectionGuide: 'local' | 'internet' = localServer ? 'local' : 'internet';
+const ensureName = () => {
+  if (!landingName.trim()) landingName = `Detective ${crypto.getRandomValues(new Uint32Array(1))[0].toString(36).slice(0,4).toUpperCase()}`;
+  localStorage.setItem('scarlet-seal-name', landingName); return landingName.trim();
+};
 const socket: Socket<ServerToClientEvents, ClientToServerEvents> = io({ auth: localSolo ? {} : session ?? {} });
 
 registerSW({ immediate: true });
-socket.on('session', value => { session = value; socket.auth = value; localStorage.setItem('scarlet-seal-session', JSON.stringify(value)); });
+window.addEventListener('offline', () => socket.disconnect());
+window.addEventListener('online', () => socket.connect());
+socket.on('session', value => { if (localSolo) return; session = value; socket.auth = value; localStorage.setItem('scarlet-seal-session', JSON.stringify(value)); });
 const acceptRoomState = (value: RoomView) => {
   const previous = room?.game;
   const next = value.game;
@@ -65,6 +87,7 @@ const acceptRoomState = (value: RoomView) => {
   const myTurnStarted = isNewPersonalTurn(previous, next, session?.playerId);
   const roundEnded = previous?.phase === 'playing' && next && next.phase !== 'playing';
   if (next?.phase === 'match-over' && previous?.phase !== 'match-over') {
+    if (next.matchWinnerIds.includes(session?.playerId ?? '')) cue('win');
     showMatchFinale = false;
     const winningRound = next.round;
     window.setTimeout(() => {
@@ -92,7 +115,7 @@ const acceptRoomState = (value: RoomView) => {
   newlyOut = events.newlyOut;
   newlyProtected = events.newlyProtected;
   const newReaction = value.reaction?.sequence && value.reaction.sequence !== room?.reaction?.sequence;
-  room = value; restoredSeat = restoringSeat || restoredSeat; restoringSeat = false; error = '';
+  room = value; if (value.code === landingCode) invitationPending = false; restoredSeat = restoringSeat || restoredSeat; restoringSeat = false; error = '';
   if (showFirstRoundTips && next && next.phase !== 'playing') { showFirstRoundTips = false; localStorage.setItem('scarlet-seal-tips-complete', 'yes'); }
   if (events.roundStarted) inspectedCard = undefined;
   if (events.roundStarted) { animatedRound = -1; animatedFinale = false; }
@@ -102,39 +125,45 @@ const acceptRoomState = (value: RoomView) => {
     window.setTimeout(() => { if (visibleReactionSequence === value.reaction?.sequence) { visibleReactionSequence = 0; render(); } }, 2400);
   }
   render();
-  if (roundEnded) requestAnimationFrame(() => { document.querySelector('.round-reveal')?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' }); document.querySelector<HTMLElement>('#result-title')?.focus({ preventScroll: true }); });
+  if (roundEnded) requestAnimationFrame(() => { document.querySelector('.round-reveal')?.scrollIntoView({ behavior: (quietMotion || window.matchMedia('(prefers-reduced-motion: reduce)').matches) ? 'auto' : 'smooth', block: 'center' }); document.querySelector<HTMLElement>('#result-title')?.focus({ preventScroll: true }); });
   if (myTurnStarted) {
-    playTurnSound(soundEnabled);
+    cue('turn');
     const badge = document.querySelector('.turn-alert');
     window.setTimeout(() => badge?.remove(), 2400);
   }
 };
 socket.on('room:state', value => { if (!localSolo) acceptRoomState(value); });
-window.addEventListener('pointerdown', unlockTurnSound, { passive: true });
-window.addEventListener('keydown', unlockTurnSound);
+window.addEventListener('pointerdown', unlockSound, { passive: true });
+window.addEventListener('keydown', unlockSound);
 socket.on('connect_error', () => { if (localSolo) return; error = 'Unable to reach the game server.'; render(); });
-socket.on('disconnect', () => { if (room) render(); });
-const refreshRooms = () => socket.emit('rooms:list', result => {
+socket.on('disconnect', () => { busy = false; render(); });
+const refreshRooms = () => {
+  if (!socket.connected || room) return;
+  socket.emit('rooms:list', result => {
   if (!result.ok || room) return;
   if (JSON.stringify(availableRooms) === JSON.stringify(result.value)) return;
   availableRooms = result.value;
-  if (!rulesOpen) render();
-});
+  if (!rulesOpen && !settingsOpen) render();
+  });
+};
 socket.on('connect', () => {
-  refreshRooms();
+  error = ''; render(); refreshRooms();
   if (session && !localSolo) socket.emit('room:resume', result => {
     if (result.ok) return;
     restoringSeat = false; session = undefined; socket.auth = {};
     localStorage.removeItem('scarlet-seal-session'); localStorage.removeItem('royal-post-session');
-    error = result.error; render();
+    error = result.error; render(); joinInvitation();
   });
+  else joinInvitation();
 });
 window.setInterval(refreshRooms, 3000);
 
 const emit = <T>(send: (callback: (result: Result<T>) => void) => void) => {
   if (busy) return;
+  if (!socket.connected) { error = 'Reconnecting to the server. Solo play is available offline.'; render(); return; }
   busy = true; error = ''; render();
-  send(result => { busy = false; if (!result.ok) error = result.error; render(); });
+  const timeout = window.setTimeout(() => { busy = false; error = 'The server is taking longer than expected. Reconnecting to check your seat…'; socket.disconnect().connect(); render(); }, 12000);
+  send(result => { clearTimeout(timeout); busy = false; if (!result.ok) error = result.error; render(); });
 };
 function updateLocal(): void {
   if (!localSolo) return;
@@ -154,20 +183,32 @@ function localAction(action: (solo: LocalSolo) => void): void {
   catch (reason) { error = reason instanceof Error ? reason.message : 'That move is not available.'; render(); }
 }
 const quickPlay = (name: string) => {
+  if (busy) return;
   if (!socket.connected) {
     localSolo = LocalSolo.create(); session = localSolo.session; socket.auth = {};
     localStorage.removeItem('scarlet-seal-session'); localStorage.removeItem('royal-post-session');
     updateLocal(); runLocalBots(localSolo); return;
   }
-  busy = true; error = ''; render();
-  socket.emit('room:create', name, created => {
-    if (!created.ok) { busy = false; error = created.error; render(); return; }
+  emit<true>(done => socket.emit('room:create', name, created => {
+    if (!created.ok) { done(created); return; }
     socket.emit('room:add-bot', botAdded => {
-      if (!botAdded.ok) { busy = false; error = botAdded.error; render(); return; }
-      socket.emit('game:start', started => { busy = false; if (!started.ok) error = started.error; render(); });
+      if (!botAdded.ok) { done(botAdded); return; }
+      socket.emit('game:start', done);
     });
-  });
+  }));
 };
+function joinRoom(code: string): void {
+  if (!validInvitation(code.trim().toUpperCase())) { error = 'Enter the five-character room code from your invitation.'; render(); return; }
+  emit(cb => socket.emit('room:join', { code: code.trim().toUpperCase(), name: ensureName() }, cb));
+}
+function joinInvitation(): void {
+  if (!invitationPending || session || localSolo || busy) return;
+  invitationPending = false; joinRoom(landingCode);
+}
+function notify(message: string): void {
+  toast = message; clearTimeout(toastTimer); render();
+  toastTimer = window.setTimeout(() => { toast = ''; root.querySelector('.status-toast')?.remove(); }, 3500);
+}
 const esc = (value: string) => value.replace(/[&<>'"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[c]!);
 const CARD_FACE_TEXT: Record<CardValue, string> = {
   0: 'Bonus seal if you alone used Wiretap and survive.',
@@ -254,27 +295,34 @@ function returnRecap(): string {
   return `<aside class="return-recap" role="status"><span aria-hidden="true">↪</span><div><b>Welcome back to your seat</b><p>${status}</p></div><button type="button" id="dismiss-recap" aria-label="Dismiss welcome back update">×</button></aside>`;
 }
 
+function preferencesSheet(): string {
+  return settingsOpen ? `<div class="dialog-backdrop"><section class="confirm-dialog preferences" role="dialog" aria-modal="true" aria-labelledby="preferences-title"><header><h2 id="preferences-title">Table preferences</h2><button id="close-settings" aria-label="Close preferences">×</button></header><label><input type="checkbox" id="sound-preference" ${soundEnabled ? 'checked' : ''}> Gentle sound cues</label><label><input type="checkbox" id="quiet-motion" ${quietMotion ? 'checked' : ''}> Quiet motion</label><label><input type="checkbox" id="haptics" ${haptics ? 'checked' : ''}> Touch feedback where supported</label><p>Saved on this device. System reduced motion is always respected. Help and preferences do not pause a live table.</p></section></div>` : '';
+}
+function connectionHelp(): string {
+  return `<section class="connection-guide" aria-label="Ways to play with friends"><div><button type="button" data-connection="internet" aria-pressed="${connectionGuide === 'internet'}">Over the internet</button><button type="button" data-connection="local" aria-pressed="${connectionGuide === 'local'}">Same network</button></div><p>${connectionGuide === 'internet' ? localServer ? 'This is a local server address. Internet friends need the public game address.' : 'Host a table and share its invitation link. Friends can join from anywhere with internet.' : 'Everyone opens the host computer’s LAN game address, then joins by link or code. There is no nearby-device discovery.'}</p><details data-detail="connection-guide"><summary>Connection requirements</summary><p>${connectionGuide === 'local' ? 'Run the installed game server on one computer and keep it awake. Everyone uses its LAN IP and game port. Offline LAN hosting can work without internet; guest-Wi-Fi isolation or firewalls can still block access.' : 'Everyone must use the same publicly reachable server. Localhost and private LAN links cannot invite another network.'}</p>${connectionGuide === 'internet' && localServer ? '<a href="https://scarlet-seal.onrender.com/">Open the internet-hosted game ↗</a>' : ''}</details></section>`;
+}
+
 function landing(): string {
   if (restoringSeat) return `<main class="resume-seat"><div class="crest">${logo('crest-logo')}</div><p class="eyebrow">SAVED TABLE FOUND</p><h1>Return to<br><i>your seat</i></h1><p>Reconnecting you to room ${esc(session?.roomCode ?? '')}…</p>${error ? `<p class="error" role="alert">${esc(error)}</p><button type="button" id="retry-seat" class="secondary">Try reconnecting</button>` : '<span class="resume-pulse" aria-hidden="true"></span>'}</main>`;
   const roomRows = availableRooms.map(available => `<button type="button" class="room-row" data-join-room="${available.code}"><span class="room-identity"><b>${esc(available.hostName)}'s table</b><small>${available.code} · ${available.botCount ? `${available.botCount} bot${available.botCount === 1 ? '' : 's'}` : 'people only'}</small></span><span class="room-seats"><b>${available.playerCount}/${available.maxPlayers}</b><small>seats</small></span><span class="room-join">Sit down <i>›</i></span></button>`).join('');
   return `<main class="landing">
-    <div class="landing-tools">${rulesButton()}</div>
-    <section class="home-hero"><div class="crest">${logo('crest-logo')}</div><div><p class="eyebrow">A GAME OF DECEPTION &amp; DEDUCTION</p><h1>Scarlet <i>Seal</i></h1><p class="intro">Start a case now, or sit down at a nearby table.</p></div></section>
+    <a class="collection-link home-collection" href="https://decadenceinc.com/">← Decadence Arcade</a><div class="landing-tools">${rulesButton()}</div>
+    <section class="home-hero"><div class="crest">${logo('crest-logo')}</div><div><p class="eyebrow">A GAME OF DECEPTION &amp; DEDUCTION</p><h1>Scarlet <i>Seal</i></h1><p class="intro">One card to keep. One card to play. Claim three seals.</p></div></section>
     <p class="entry-meta" aria-label="Game details"><span>2–6 players</span><span>Quick rounds</span><span>Learn as you play</span></p>
     <button type="button" id="quick-play" class="primary quick-play" ${busy ? 'disabled' : ''}><span><b>Play against a bot</b><small>Start a private case now · no setup</small></span><i aria-hidden="true">›</i></button>
-    <form id="lan-form" class="lan-panel"><div class="section-heading"><div><p class="eyebrow">PLAY TOGETHER</p><h2>Share a table</h2></div><span class="live-dot">Live</span></div><label>Your name<input name="name" maxlength="20" autocomplete="nickname" placeholder="Detective Violet" value="${esc(landingName)}" required></label>
+    <form id="lan-form" class="lan-panel"><div class="section-heading"><div><p class="eyebrow">PLAY TOGETHER</p><h2>Share a table</h2></div><span class="live-dot">${socket.connected ? 'Connected' : 'Connecting…'}</span></div><details class="optional-name" data-detail="name"><summary>${landingName ? `Playing as ${esc(landingName)}` : 'Choose a nickname (optional)'}</summary><label>Your name<input name="name" maxlength="20" autocomplete="nickname" placeholder="We’ll suggest a detective name" value="${esc(landingName)}"></label></details>
       <div class="entry-choices"><button type="submit" id="create-room" class="entry-choice" ${busy ? 'disabled' : ''}><span aria-hidden="true">＋</span><span><b>Host a table</b><small>Invite friends or add bots</small></span><i aria-hidden="true">›</i></button><button type="button" id="show-join-code" class="entry-choice ${joiningByCode ? 'active' : ''}" aria-expanded="${joiningByCode}" aria-controls="join-code-panel"><span aria-hidden="true">⌗</span><span><b>Join with a code</b><small>Enter the code from your host</small></span><i aria-hidden="true">${joiningByCode ? '⌄' : '›'}</i></button></div>
       <div id="join-code-panel" class="code-join" ${joiningByCode ? '' : 'hidden'}><label>Room code<input name="code" maxlength="5" autocomplete="off" autocapitalize="characters" placeholder="ABCDE" value="${esc(landingCode)}"></label><button type="button" id="join-code" class="secondary" ${busy ? 'disabled' : ''}>Join table</button></div>
-      <div class="nearby-heading"><b>Nearby tables</b><small>${availableRooms.length ? `${availableRooms.length} waiting` : 'None waiting'}</small></div><div class="available-rooms">${roomRows || '<div class="empty-rooms"><b>No tables are waiting yet</b><small>Host one and share its invite.</small></div>'}</div>
+      <div class="nearby-heading"><b>Tables on this server</b><small>${availableRooms.length ? `${availableRooms.length} waiting` : 'None waiting'}</small></div><div class="available-rooms">${roomRows || '<div class="empty-rooms"><b>No tables are waiting yet</b><small>Host one and share its invite.</small></div>'}</div>
     </form>
-    ${error ? `<p class="error" role="alert">${esc(error)}</p>` : ''}
+    ${connectionHelp()}${error ? `<p class="error" role="alert">${esc(error)}</p>` : ''}
   </main>${rulesSheet()}`;
 }
 
 function lobby(): string {
   const me = room!.players.find(p => p.id === session?.playerId);
   const isHost = me?.host;
-  const share = `${location.origin}?room=${room!.code}`;
+  const share = joinLink(location.origin, room!.code);
   const botCount = room!.players.filter(player => player.bot).length;
   const humanCount = room!.players.length - botCount;
   const absentCount = room!.players.filter(player => !player.bot && !player.connected).length;
@@ -282,19 +330,18 @@ function lobby(): string {
   const seats = Array.from({ length: Math.max(4, Math.min(MAX_PLAYERS, room!.players.length + 1)) }, (_, index) => {
     const player = room!.players[index];
     if (!player) return `<div class="player-row empty-seat"><span class="seat-number">${index + 1}</span><span class="avatar" aria-hidden="true">＋</span><strong>Open seat</strong></div>`;
-    return `<div class="player-row ${player.connected ? 'ready-seat' : 'offline-seat'}"><span class="seat-number">${index + 1}</span><span class="avatar" aria-hidden="true">${player.bot ? 'B' : esc(player.name[0].toUpperCase())}</span><strong>${esc(player.name)}</strong>${player.host ? '<small>HOST</small>' : ''}${player.bot ? '<small>BOT</small>' : ''}${isHost && player.bot ? `<button type="button" class="remove-bot" data-remove-bot="${player.id}" aria-label="Remove ${esc(player.name)}">×</button>` : `<span class="presence ${player.connected ? '' : 'offline'}"><i aria-hidden="true"></i>${player.connected ? 'Ready' : 'Offline'}</span>`}</div>`;
+    return `<div class="player-row ${player.connected ? 'ready-seat' : 'offline-seat'}"><span class="seat-number">${index + 1}</span><span class="avatar" aria-hidden="true">${player.bot ? 'B' : esc(player.name[0].toUpperCase())}</span><strong>${esc(player.name)}</strong>${player.host ? '<small>HOST</small>' : ''}${player.bot ? '<small>BOT</small>' : ''}${isHost && player.bot ? `<button type="button" class="remove-bot" data-remove-bot="${player.id}" aria-label="Remove ${esc(player.name)}">×</button>` : `<span class="presence ${player.connected ? '' : 'offline'}"><i aria-hidden="true"></i>${!player.connected ? 'Offline' : player.ready ? 'Ready' : 'Not ready'}</span>`}</div>`;
   }).join('');
-  return `<main class="lobby"><header>${leaveButton()}<span class="brand">${logo('mini-crest')}<span>Scarlet Seal</span></span>${rulesButton('Rules')}</header>
-    ${returnRecap()}<section class="room-code"><div><p class="eyebrow">INVITE CODE</p><h2>${room!.code}</h2></div><button type="button" id="share" class="text-button">Share invite ↗</button><input class="sr-only" value="${share}" aria-hidden="true"></section>
+  return `<main class="lobby"><header>${leaveButton()}<span class="brand">${logo('mini-crest')}<span>Scarlet Seal</span></span>${rulesButton('Rules')}</header>${connectionNotice()}<section class="lobby-next"><button type="button" id="ready" class="${me?.ready ? 'secondary' : 'primary'}" aria-pressed="${!!me?.ready}" ${busy ? 'disabled' : ''}>${me?.ready ? 'Ready ✓ · tap to unready' : 'I’m ready'}</button><div class="lobby-actions">${room!.canStart ? isHost ? `<button type="button" id="start" class="primary" ${busy ? 'disabled' : ''}>Start ${startingCount}-player game →</button>` : '<p class="waiting-host"><span aria-hidden="true">◌</span> Waiting for the host to start</p>' : `<p class="waiting-host">${isHost ? room!.players.length < 2 ? 'Invite a friend or add a bot to start.' : 'Waiting for everyone to mark ready.' : me?.ready ? 'You’re ready. Waiting for the host…' : 'Mark ready when you’re settled in.'}</p>`}<small>${absentCount ? 'Offline seats leave when the game starts. A bot fills the second seat if needed.' : 'Draw one, play one, keep one. First to three seals wins.'}</small></div></section>
+    ${returnRecap()}<section class="room-code"><p class="eyebrow">INVITE YOUR CREW</p><button type="button" id="share" class="${room!.canStart ? 'secondary' : 'primary'}">${uiIcon('invite')} Invite friends</button><p class="room-code-fallback">Room code <b>${room!.code}</b></p><label>Or copy the invitation link<input id="invite-link" readonly value="${esc(share)}"></label><p class="connection-help">${location.hostname === 'localhost' || location.hostname === '127.0.0.1' ? 'This link opens only on this computer. Open the host’s LAN URL before inviting nearby friends.' : localServer ? 'Friends must reach this server on your local network. Keep the host computer awake.' : 'Share this link with friends anywhere. Everyone needs internet.'}</p></section>
     <section class="players"><div class="seat-heading"><div><p class="eyebrow">PLAYERS &amp; BOTS</p><h3>At the table</h3></div><span>${room!.players.length} / ${MAX_PLAYERS} seats</span></div><div class="lobby-seats">${seats}</div></section>
     ${isHost ? `<section class="seat-controls"><div><strong>Fill an empty seat</strong><small>${humanCount} ${humanCount === 1 ? 'person' : 'people'} · ${botCount} ${botCount === 1 ? 'bot' : 'bots'}</small></div><button type="button" id="add-bot" class="add-bot" ${room!.players.length >= MAX_PLAYERS || busy ? 'disabled' : ''}><span>＋</span>Add bot</button></section>` : ''}
-    <div class="lobby-actions">${room!.canStart ? isHost ? `<button type="button" id="start" class="primary" ${busy ? 'disabled' : ''}>Start ${startingCount}-player game →</button>` : '<p class="waiting-host"><span aria-hidden="true">◌</span> Waiting for the host to start</p>' : `<p class="waiting-host">${isHost ? 'Invite someone or add a bot to fill the second seat.' : 'Waiting for the host to fill the table…'}</p>`}<small>${absentCount ? 'Offline seats leave when the game starts. A bot fills the second seat if needed.' : 'Draw one, play one, keep one. First to three seals wins.'}</small></div>
-    ${connectionNotice()}${error ? `<p class="error">${esc(error)}</p>` : ''}</main>${rulesSheet()}${leaveSheet()}`;
+    ${error ? `<p class="error">${esc(error)}</p>` : ''}</main>${rulesSheet()}${leaveSheet()}`;
 }
 
 function matchFinale(): string {
   const game = room!.game!;
-  const animateFinale = !animatedFinale && !rulesOpen && !leaveOpen;
+  const animateFinale = !animatedFinale && !rulesOpen && !leaveOpen && !settingsOpen;
   if (animateFinale) animatedFinale = true;
   const meId = session!.playerId;
   const champions = game.matchWinnerIds.map(id => id === meId ? 'You' : game.players.find(player => player.id === id)?.name ?? 'A player');
@@ -306,7 +353,7 @@ function matchFinale(): string {
   const bonus = game.roundSummary?.awards.some(award => award.source === 'wiretap' && game.matchWinnerIds.includes(award.playerId));
   const isHost = room!.players.some(player => player.id === meId && player.host);
   const confetti = Array.from({ length: 32 }, (_, index) => `<i style="left:${(index * 37) % 96}%;animation-delay:${index * 35}ms" aria-hidden="true"></i>`).join('');
-  return `<main class="match-finale ${animateFinale ? 'animate' : ''}"><header>${leaveButton()}<span class="table-brand">${logo('mini-crest')}<b>Scarlet Seal</b></span>${rulesButton('Rules')}</header>${connectionNotice()}${returnRecap()}<section class="finale-stage" aria-labelledby="finale-title"><div class="round-confetti" aria-hidden="true">${confetti}</div><p class="eyebrow">CASE CLOSED · ROUND ${game.round}</p>${logo('finale-seal')}<h1 id="finale-title" tabindex="-1">${esc(champion)} ${verb}!</h1><p class="finale-subtitle">${game.matchWinnerIds.includes(meId) ? 'You cracked the case.' : `${esc(leader?.name ?? 'The winner')} cracked the case.`}</p><div class="finale-score"><span>${seal()}<strong>${leader?.tokens ?? tokenTarget(game.players.length)}</strong></span><b>seals collected</b></div><p class="finale-reason">${esc(game.roundSummary?.reason ?? `Final round: ${roundWinners} won.`)} ${bonus ? 'A Wiretap bonus seal helped decide the match.' : ''}</p><div class="finale-actions">${isHost ? `<button type="button" id="rematch" class="primary" ${busy ? 'disabled' : ''}>Play again ↻</button>` : '<p>Waiting for the host to play again…</p>'}<button type="button" id="finish-home" class="secondary">Leave table</button></div><div class="finale-standings"><h2>Final standings</h2><ol class="finale-leaderboard">${sealTrack}</ol></div></section>${error ? `<p class="error">${esc(error)}</p>` : ''}</main>${rulesSheet()}${leaveSheet()}`;
+  return `<main class="match-finale ${animateFinale ? 'animate' : ''}"><header>${leaveButton()}<span class="table-brand">${logo('mini-crest')}<b>Scarlet Seal</b></span>${rulesButton('Rules')}</header>${connectionNotice()}${returnRecap()}<section class="finale-stage" aria-labelledby="finale-title"><div class="round-confetti" aria-hidden="true">${confetti}</div><p class="eyebrow">CASE CLOSED · ROUND ${game.round}</p>${logo('finale-seal')}<h1 id="finale-title" tabindex="-1">${esc(champion)} ${verb}!</h1><p class="finale-subtitle">${game.matchWinnerIds.includes(meId) ? 'You cracked the case.' : `${esc(leader?.name ?? 'The winner')} cracked the case.`}</p><div class="finale-score"><span>${seal()}<strong>${leader?.tokens ?? tokenTarget(game.players.length)}</strong></span><b>seals collected</b></div><p class="finale-reason">${esc(game.roundSummary?.reason ?? `Final round: ${roundWinners} won.`)} ${bonus ? 'A Wiretap bonus seal helped decide the match.' : ''}</p><div class="finale-actions">${isHost ? `<button type="button" id="rematch" class="primary" ${busy ? 'disabled' : ''}>Rematch · same crew ↻</button>` : '<p>Waiting for the host to play again…</p>'}${isHost && !localSolo ? '<button type="button" id="return-lobby" class="secondary">Invite more friends</button>' : ''}<button type="button" id="finish-home" class="secondary">Leave table</button></div><div class="finale-standings"><h2>Final standings</h2><ol class="finale-leaderboard">${sealTrack}</ol></div></section>${error ? `<p class="error">${esc(error)}</p>` : ''}</main>${rulesSheet()}${leaveSheet()}`;
 }
 
 function game(): string {
@@ -360,16 +407,16 @@ function game(): string {
   const roundTimeline = decisivePlays.length ? `<details class="round-timeline" data-detail="round-timeline"><summary><b>Round timeline</b><small>${decisivePlays.length} events</small></summary><ol>${decisivePlays.map((line, index) => `<li><span class="timeline-number" aria-hidden="true">${index + 1}</span><span>${esc(line)}</span></li>`).join('')}</ol></details>` : '';
   const resultActions = game.phase === 'round-over'
     ? isHost ? `<button type="button" id="next-round" class="primary replay-button" ${busy ? 'disabled' : ''}>Deal next round →</button>` : '<p class="result-wait">Waiting for the host to deal…</p>'
-    : '<p class="result-wait">Final result coming up…</p>';
+    : `${isHost ? '<button id="rematch" class="primary">Rematch · same crew</button>' : '<p class="result-wait">Waiting for the host to play again…</p>'}<button id="show-finale" class="secondary">See final results</button>`;
   const celebrationDelay = 650 + (game.roundSummary?.reveals.length ?? 0) * 300;
   const confetti = Array.from({ length: 24 }, (_, index) => `<i style="left:${(index * 37) % 96}%;animation-delay:${celebrationDelay + index * 30}ms" aria-hidden="true"></i>`).join('');
-  const animateRound = game.phase !== 'playing' && animatedRound !== game.round && !rulesOpen && !leaveOpen;
+  const animateRound = game.phase !== 'playing' && animatedRound !== game.round && !rulesOpen && !leaveOpen && !settingsOpen;
   if (animateRound) animatedRound = game.round;
   const roundOverlay = game.phase !== 'playing' ? `<section class="round-reveal ${animateRound ? 'animate' : ''}" aria-labelledby="result-title"><div class="round-confetti" aria-hidden="true">${confetti}</div><div class="round-reveal-head"><p class="eyebrow">ROUND ${game.round} · CARDS REVEALED</p><h2 id="result-title" tabindex="-1">${esc(winnerNames || 'A rival')} ${winnerVerb} the round</h2><p>${esc(roundReason ?? '')}</p></div><ol class="flip-seats">${roundReveals}</ol><div class="round-reveal-bottom"><div class="seal-awards"><h3>Seals earned</h3><ul>${awardRows}</ul></div>${resultActions}${roundTimeline}</div></section>` : '';
   const reaction = room!.reaction && visibleReactionSequence === room!.reaction.sequence ? room!.reaction : undefined;
   const reactionPlayer = reaction ? room!.players.find(player => player.id === reaction.playerId) : undefined;
   const aliveCount = game.players.filter(p => !p.eliminated).length;
-  return `<main class="table"><header class="table-header"><span class="table-brand">${logo('mini-crest')}<b>Scarlet Seal</b><small>ROUND ${game.round}</small></span><nav aria-label="Game navigation">${leaveButton()}${rulesButton('Rules')}<button type="button" id="sound-toggle" class="sound-toggle" aria-label="${soundEnabled ? 'Mute turn sound' : 'Enable turn sound'}" aria-pressed="${soundEnabled}" title="${soundEnabled ? 'Turn sound on' : 'Turn sound off'}"><span aria-hidden="true">♫</span></button></nav><span class="deck-count">DRAW PILE <b>${game.deckCount}</b></span></header>${connectionNotice()}${returnRecap()}
+  return `<main class="table"><header class="table-header"><span class="table-brand">${logo('mini-crest')}<b>Scarlet Seal</b><small>ROUND ${game.round}</small></span><nav aria-label="Game navigation">${leaveButton()}${rulesButton('Rules')}<button type="button" id="sound-toggle" class="sound-toggle" aria-label="${soundEnabled ? 'Mute sound' : 'Enable sound'}" aria-pressed="${soundEnabled}" title="${soundEnabled ? 'Sound on' : 'Sound off'}"><span aria-hidden="true">♫</span></button></nav><span class="deck-count">DRAW PILE <b>${game.deckCount}</b></span></header>${connectionNotice()}${returnRecap()}
     <section class="game-felt ${roundStarted ? 'round-enter' : ''}" aria-label="Game table"><section class="table-seats" aria-label="Players in turn order"><div class="table-section-heading"><span>INVESTIGATORS <b>${aliveCount} / ${game.players.length} IN</b></span><small>First to ${tokenTarget(game.players.length)} seals</small></div><div class="opponents">${game.players.map((p, index) => { const isMe = p.id === me.id; const targeted = game.lastAction?.targetId === p.id; const hasTurn = game.turnPlayerId === p.id && game.phase === 'playing'; return `<div data-player-id="${p.id}" class="opponent ${isMe ? 'your-seat' : ''} ${p.eliminated ? 'out' : 'alive'} ${targeted ? 'targeted' : ''} ${hasTurn ? 'current-turn' : ''} ${hasTurn && turnChanged ? 'turn-enter' : ''} ${newlyOut.has(p.id) ? 'just-out' : ''} ${newlyProtected.has(p.id) ? 'just-shielded' : ''}"><div class="seat-top"><span class="seat-order">${index + 1}</span><b>${isMe ? 'You' : esc(p.name)}</b><span class="seat-score ${earnedSeals.has(p.id) ? 'seal-earned' : ''}">${p.tokens} ${seal()}</span></div><div class="seat-bottom"><span class="opponent-card ${p.handCount > 1 ? 'two-cards' : ''}" aria-label="${isMe ? 'Your hand is below' : `${p.handCount} hidden card${p.handCount === 1 ? '' : 's'}`}">${p.eliminated ? '✕' : isMe ? '↓' : '?'}</span><span class="seat-state"><strong>${p.eliminated ? 'OUT' : hasTurn ? (isMe ? 'YOUR TURN' : 'PLAYING') : 'IN'}</strong>${p.protected ? '<small>Shielded</small>' : isMe ? '<small>Your hand below</small>' : `<small>${p.handCount} card${p.handCount === 1 ? '' : 's'}</small>`}</span></div></div>`; }).join('')}</div></section><div class="board-center">${game.phase === 'playing' ? actionStage : roundOverlay}</div>${publicDiscards}</section>
     ${game.phase === 'playing' ? `<section class="decision-zone" ${room!.migration || !socket.connected ? 'inert' : ''}><section class="turn-banner ${myTurn ? 'active' : ''} ${turnChanged ? 'turn-enter' : ''} ${turnCue ? 'turn-call' : ''}" aria-live="polite"><span class="turn-dot" aria-hidden="true"></span><div><small>${turnStep}</small><p>${instruction}</p>${turnCue ? '<span class="turn-alert" aria-hidden="true">✦ YOUR TURN</span>' : ''}${firstRoundTip}</div><span class="turn-next">${nextPlayer ? `NEXT <b>${nextPlayer.id === me.id ? 'YOU' : esc(nextPlayer.name)}</b>` : ''}</span></section>${ownReceipt}${game.notice && !choosingBottom ? privateClue(game.notice) : ''}<section class="play-area"><section class="hand"><div class="hand-heading"><p class="eyebrow">${choosingBottom ? 'CHOOSE ONE TO KEEP' : game.hand.length > 1 ? 'YOUR TWO CARDS' : 'YOUR CARD'}</p><span>${choosingBottom ? selectedKeepIndex === undefined ? 'Tap your favourite' : 'Tap another to change' : myTurn ? 'Choose one to play' : 'Only you can see this'}</span></div><div class="cards ${choosingBottom ? 'review-cards' : ''}">${game.hand.map((v, index) => card(v, index, !busy && (choosingBottom || myTurn && playable.has(v)), forcedCard === v, choosingBottom, myTurn && !choosingBottom && !playable.has(v) ? (forcedCard !== undefined ? 'Red Herring must be played' : 'Unavailable now') : '')).join('')}</div></section>${action ? `<div id="turn-action">${action}</div>` : ''}</section></section>` : ''}
     ${game.phase !== 'playing' ? '<div class="result-side">' : ''}<details class="reactions" data-detail="reactions"><summary><span aria-hidden="true">☺</span> React <span aria-hidden="true">⌄</span></summary><nav aria-label="Table reactions"><button type="button" data-reaction="Suspicious"><span aria-hidden="true">◉</span><small>Suspicious</small></button><button type="button" data-reaction="Nice try"><span aria-hidden="true">✦</span><small>Nice try</small></button><button type="button" data-reaction="Case closed"><span aria-hidden="true">✓</span><small>Case closed</small></button></nav></details><details class="case-feed" data-detail="case-feed" aria-label="Recent public plays"><summary>Case notes <span>${game.publicActions.length} plays</span></summary><ol>${game.publicActions.slice(-5).reverse().map(event => { const actor = game.players.find(p => p.id === event.actorId); const target = game.players.find(p => p.id === event.targetId); return `<li><span class="play-value">${event.card}</span><span><b>${actor?.id === me.id ? 'You' : esc(actor?.name ?? 'Player')} played ${CARDS[event.card].name}${target ? ` on ${target.id === me.id ? 'you' : esc(target.name)}` : ''}${event.guess !== undefined ? `, guessing ${CARDS[event.guess].name}` : ''}</b><small>${esc(event.resolution)}</small></span></li>`; }).join('')}</ol></details>${game.phase !== 'playing' ? '</div>' : ''}
@@ -377,7 +424,7 @@ function game(): string {
 }
 
 function animateGameState(origin: DOMRect | undefined, deck: DOMRect | undefined, fromIndex: number): void {
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  if ((quietMotion || window.matchMedia('(prefers-reduced-motion: reduce)').matches)) return;
   const featured = document.querySelector<HTMLElement>('.action-stage.animate .featured-play');
   if (featured && origin) {
     const stage = featured.closest<HTMLElement>('.action-stage');
@@ -409,20 +456,33 @@ function animateGameState(origin: DOMRect | undefined, deck: DOMRect | undefined
 }
 
 function render(): void {
+  const focused = document.activeElement as HTMLElement | null;
+  const focusSelector = focused?.id ? `#${focused.id}` : focused?.matches('input[name]') ? `input[name="${(focused as HTMLInputElement).name}"]` : focused?.matches('[data-card-index]') ? `[data-card-index="${focused.dataset.cardIndex}"]` : focused?.matches('[data-target]') ? `[data-target="${focused.dataset.target}"]` : focused?.matches('[data-guess]') ? `[data-guess="${focused.dataset.guess}"]` : undefined;
+  const selection = focused instanceof HTMLInputElement && /^(text|search|tel|url|password)$/.test(focused.type) ? [focused.selectionStart, focused.selectionEnd] : undefined;
+  const rulesScroll = root.querySelector('.rules-body')?.scrollTop;
+
   const origin = animateAction ? playOrigin : undefined;
   const deck = drawOrigin;
   const fromIndex = drawFromIndex;
   const openDetails = new Set([...root.querySelectorAll<HTMLDetailsElement>('details[data-detail][open]')].map(detail => detail.dataset.detail));
   const discardScroll = root.querySelector<HTMLElement>('.discard-lanes')?.scrollLeft ?? 0;
-  root.innerHTML = !room ? landing() : room.game ? game() : lobby();
-  document.body.classList.toggle('dialog-open', rulesOpen || leaveOpen);
+  root.innerHTML = (!room ? landing() : room.game ? game() : lobby()) + preferencesSheet();
+  const header = root.querySelector('.landing-tools') ?? root.querySelector('.table-header nav') ?? root.querySelector('main>header');
+  header?.insertAdjacentHTML('beforeend', `<button id="open-settings" class="settings-button" aria-label="Table preferences">${uiIcon('settings')}</button>`);
+  if (room) root.querySelector('main')?.insertAdjacentHTML('beforeend', '<a class="collection-link" href="https://decadenceinc.com/">← Arcade collection</a>');
+  if (room && landingCode && room.code !== landingCode) root.querySelector('main')?.insertAdjacentHTML('afterbegin', `<p class="connection-notice">Your invitation is for ${esc(landingCode)}. Leave this table to follow it.</p>`);
+  if (toast) root.insertAdjacentHTML('beforeend', `<p class="status-toast" role="status">${esc(toast)}</p>`);
+  if (room?.migration) root.querySelector<HTMLButtonElement>('#ready')?.setAttribute('disabled','');
+  if (busy || (!localSolo && !socket.connected)) root.querySelectorAll<HTMLButtonElement>('#create-room, #join-code, #start, #ready, #rematch, #return-lobby, [data-card], [data-target], [data-guess], #confirm, #confirm-bottom').forEach(button => button.disabled = true);
+
+  document.body.classList.toggle('dialog-open', rulesOpen || leaveOpen || settingsOpen);
   document.body.classList.toggle('offline-solo', Boolean(localSolo));
   if (localSolo) root.querySelector('.decision-zone')?.removeAttribute('inert');
   root.querySelectorAll<HTMLDetailsElement>('details[data-detail]').forEach(detail => { if (openDetails.has(detail.dataset.detail)) detail.open = true; });
   const discardRail = root.querySelector<HTMLElement>('.discard-lanes');
   if (discardRail) discardRail.scrollLeft = discardScroll;
   const screen = root.querySelector<HTMLElement>('main');
-  if (screen) screen.inert = rulesOpen || leaveOpen;
+  if (screen) screen.inert = rulesOpen || leaveOpen || settingsOpen;
   animateAction = false;
   playOrigin = undefined;
   drawOrigin = undefined;
@@ -435,6 +495,9 @@ function render(): void {
   newlyOut = new Set();
   newlyProtected = new Set();
   bind();
+  if (rulesScroll !== undefined) { const body = root.querySelector('.rules-body'); if (body) body.scrollTop = rulesScroll; }
+  const replacement = focusSelector ? root.querySelector<HTMLElement>(focusSelector) : undefined; replacement?.focus({ preventScroll: true });
+  if (replacement instanceof HTMLInputElement && selection) replacement.setSelectionRange(selection[0], selection[1]);
   if (origin || deck) {
     const screen = root.firstElementChild;
     requestAnimationFrame(() => { if (root.firstElementChild === screen) animateGameState(origin, deck, fromIndex); });
@@ -455,7 +518,7 @@ function render(): void {
 
 const revealTurnAction = () => requestAnimationFrame(() => {
   const action = document.querySelector('#turn-action');
-  action?.scrollIntoView({ block: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+  action?.scrollIntoView({ block: 'nearest', behavior: (quietMotion || window.matchMedia('(prefers-reduced-motion: reduce)').matches) ? 'auto' : 'smooth' });
   const next = selectedTarget && selectedGuess === undefined ? action?.querySelector<HTMLElement>('[data-guess]') : undefined;
   (next || action?.querySelector<HTMLElement>('#confirm, #confirm-bottom, [data-target], [data-guess]'))?.focus({ preventScroll: true });
 });
@@ -463,6 +526,7 @@ const revealTurnAction = () => requestAnimationFrame(() => {
 function closeDialog(): void {
   rulesOpen = false;
   leaveOpen = false;
+  settingsOpen = false;
   render();
   const selector = modalReturnFocus;
   modalReturnFocus = '';
@@ -477,8 +541,19 @@ function closeCardInspector(): void {
 }
 
 function bind(): void {
+  document.querySelector('#open-settings')?.addEventListener('click', () => { modalReturnFocus = '#open-settings'; settingsOpen = true; render(); });
+  document.querySelector('#close-settings')?.addEventListener('click', closeDialog);
+  document.querySelector('#quiet-motion')?.addEventListener('change', e => { quietMotion = (e.target as HTMLInputElement).checked; localStorage.setItem('scarlet-seal-quiet-motion', quietMotion ? 'yes' : 'no'); applyMotion(); });
+  document.querySelector('#haptics')?.addEventListener('change', e => { haptics = (e.target as HTMLInputElement).checked; localStorage.setItem('scarlet-seal-haptics', haptics ? 'yes' : 'no'); });
+  document.querySelector('#sound-preference')?.addEventListener('change', e => { soundEnabled = (e.target as HTMLInputElement).checked; localStorage.setItem('scarlet-seal-sound', soundEnabled ? 'on' : 'off'); setSoundEnabled(soundEnabled); unlockSound(); });
+  document.querySelectorAll<HTMLElement>('[data-connection]').forEach(button => button.addEventListener('click', () => { connectionGuide = button.dataset.connection as 'local' | 'internet'; render(); }));
+  document.querySelector('#invite-link')?.addEventListener('click', e => (e.target as HTMLInputElement).select());
+  document.querySelector('#ready')?.addEventListener('click', () => emit(cb => socket.emit('room:ready', !room!.players.find(player => player.id === session?.playerId)?.ready, cb)));
+  document.querySelector('#return-lobby')?.addEventListener('click', () => emit(cb => socket.emit('room:return-lobby', cb)));
+  document.querySelector('#show-finale')?.addEventListener('click', () => { showMatchFinale = true; render(); window.scrollTo({top:0}); });
+
   document.querySelector('#sound-toggle')?.addEventListener('click', () => {
-    soundEnabled = !soundEnabled;
+    soundEnabled = !soundEnabled; setSoundEnabled(soundEnabled);
     localStorage.setItem('scarlet-seal-sound', soundEnabled ? 'on' : 'off');
     render();
   });
@@ -491,10 +566,11 @@ function bind(): void {
   document.querySelector('#dismiss-recap')?.addEventListener('click', () => { restoredSeat = false; render(); });
   document.querySelector('#show-join-code')?.addEventListener('click', () => { joiningByCode = !joiningByCode; render(); if (joiningByCode) requestAnimationFrame(() => document.querySelector<HTMLInputElement>('#join-code-panel input[name=code]')?.focus()); });
   lanForm?.querySelector<HTMLInputElement>('input[name=name]')?.addEventListener('input', event => { landingName = (event.currentTarget as HTMLInputElement).value; });
+  lanForm?.querySelector<HTMLInputElement>('input[name=code]')?.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); joinRoom((event.currentTarget as HTMLInputElement).value); } });
   lanForm?.querySelector<HTMLInputElement>('input[name=code]')?.addEventListener('input', event => { landingCode = (event.currentTarget as HTMLInputElement).value.toUpperCase(); });
-  const joinRoom = (code: string) => { if (!lanForm?.reportValidity()) return; const data = new FormData(lanForm); localStorage.setItem('scarlet-seal-name', String(data.get('name'))); emit(cb => socket.emit('room:join', { code, name: String(data.get('name')) }, cb)); };
-  lanForm?.addEventListener('submit', e => { e.preventDefault(); const data = new FormData(e.currentTarget as HTMLFormElement); localStorage.setItem('scarlet-seal-name', String(data.get('name'))); emit(cb => socket.emit('room:create', String(data.get('name')), cb)); });
-  document.querySelector('#quick-play')?.addEventListener('click', () => quickPlay('You'));
+
+  lanForm?.addEventListener('submit', e => { e.preventDefault(); emit(cb => socket.emit('room:create', ensureName(), cb)); });
+  document.querySelector('#quick-play')?.addEventListener('click', () => quickPlay(landingName || 'You'));
   document.querySelector('#join-code')?.addEventListener('click', () => { const code = lanForm?.querySelector<HTMLInputElement>('input[name=code]'); if (!code?.value.trim()) { code?.focus(); code?.setCustomValidity('Enter a room code.'); code?.reportValidity(); code?.setCustomValidity(''); return; } joinRoom(code.value); });
   document.querySelectorAll<HTMLElement>('[data-join-room]').forEach(el => el.addEventListener('click', () => joinRoom(el.dataset.joinRoom!)));
   document.querySelector('#add-bot')?.addEventListener('click', () => emit(cb => socket.emit('room:add-bot', cb)));
@@ -507,11 +583,11 @@ function bind(): void {
   document.querySelector('#rematch')?.addEventListener('click', () => localSolo ? localAction(solo => solo.rematch()) : emit(cb => socket.emit('game:rematch', cb)));
   document.querySelectorAll<HTMLElement>('[data-reaction]').forEach(el => el.addEventListener('click', () => emit(cb => socket.emit('room:react', el.dataset.reaction as 'Suspicious' | 'Nice try' | 'Case closed', cb))));
   document.querySelector('#share')?.addEventListener('click', async () => {
-    const data = { title: 'Join my Scarlet Seal room', text: `Join room ${room!.code}`, url: `${location.origin}?room=${room!.code}` };
+    const data = { title: 'Join my Scarlet Seal room', text: `Join room ${room!.code}`, url: joinLink(location.origin, room!.code) };
     try {
       if (navigator.share) await navigator.share(data);
-      else { await navigator.clipboard.writeText(`${data.text}: ${data.url}`); const button = document.querySelector('#share')!; button.textContent = 'Invitation copied!'; }
-    } catch (reason) { if (reason instanceof DOMException && reason.name === 'AbortError') return; error = 'Could not share this invitation. Copy the room code instead.'; render(); }
+      else { await navigator.clipboard.writeText(`${data.text}: ${data.url}`); notify('Invitation copied. Send it to your crew.'); }
+    } catch (reason) { if (reason instanceof DOMException && reason.name === 'AbortError') return; notify('Select the invitation link to copy it, or share the room code.'); const link = document.querySelector<HTMLInputElement>('#invite-link'); link?.focus(); link?.select(); }
   });
   document.querySelectorAll('[data-leave-room], #finish-home').forEach(el => el.addEventListener('click', () => { modalReturnFocus = el.id === 'finish-home' ? '#finish-home' : '[data-leave-room]'; leaveOpen = true; render(); }));
   document.querySelector('#stay-room')?.addEventListener('click', closeDialog);
@@ -553,7 +629,7 @@ function bind(): void {
   });
   document.querySelector('#change-review')?.addEventListener('click', () => requestAnimationFrame(() => {
     const choice = document.querySelector<HTMLElement>(`[data-bottom-index="${selectedKeepIndex}"]`);
-    choice?.scrollIntoView({ block: 'center', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    choice?.scrollIntoView({ block: 'center', behavior: (quietMotion || window.matchMedia('(prefers-reduced-motion: reduce)').matches) ? 'auto' : 'smooth' });
     choice?.focus({ preventScroll: true });
   }));
   document.querySelectorAll('#turn-action .cancel:not(#change-review)').forEach(el => el.addEventListener('click', backChoice));
@@ -568,10 +644,14 @@ function backChoice(): void {
     (next || document.querySelector<HTMLElement>('.hand .card.playable'))?.focus({ preventScroll: true });
   });
 }
-function play(move: Move): void { if (localSolo) localAction(solo => solo.play(move)); else emit(cb => socket.emit('game:play', move, cb)); }
+function play(move: Move): void {
+  const feedback = () => { cue('play'); if (haptics && !quietMotion && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) navigator.vibrate?.(15); };
+  if (localSolo) localAction(solo => { solo.play(move); feedback(); });
+  else emit(cb => socket.emit('game:play', move, result => { if (result.ok) feedback(); cb(result); }));
+}
 function returnHome(): void {
-  if (localSolo) { localSolo = undefined; session = undefined; room = undefined; leaveOpen = false; restoredSeat = false; localStorage.removeItem(LOCAL_SOLO_KEY); render(); refreshRooms(); return; }
-  emit(cb => socket.emit('room:leave', result => { cb(result); if (result.ok) { socket.auth = {}; localStorage.removeItem('scarlet-seal-session'); localStorage.removeItem('royal-post-session'); location.href = location.origin; } }));
+  if (localSolo) { localSolo = undefined; session = undefined; room = undefined; leaveOpen = false; restoredSeat = false; localStorage.removeItem(LOCAL_SOLO_KEY); render(); refreshRooms(); joinInvitation(); return; }
+  emit(cb => socket.emit('room:leave', result => { cb(result); if (result.ok) { socket.auth = {}; localStorage.removeItem('scarlet-seal-session'); localStorage.removeItem('royal-post-session'); location.href = landingCode && room?.code !== landingCode ? joinLink(location.origin, landingCode) : location.origin; } }));
 }
 
 window.render_game_to_text = () => {
@@ -580,7 +660,7 @@ window.render_game_to_text = () => {
   const guide = game && me && showFirstRoundTips && game.round === 1 ? turnPresentation(game, me.id, selectedCard, selectedTarget, selectedGuess).tip : undefined;
   return JSON.stringify({
     coordinateSystem: 'DOM interface ordered top-to-bottom; no spatial playfield',
-    screen: !room ? 'home' : !game ? 'lobby' : game.phase === 'match-over' && showMatchFinale ? 'match-finale' : 'game', connected: socket.connected, offlineSolo: Boolean(localSolo), migration: room?.migration, rulesOpen, leaveOpen, inspectedCard, roomCode: room?.code, availableRooms,
+    screen: !room ? 'home' : !game ? 'lobby' : game.phase === 'match-over' && showMatchFinale ? 'match-finale' : 'game', connected: socket.connected, offlineSolo: Boolean(localSolo), migration: room?.migration, rulesOpen, leaveOpen, settingsOpen, lobbyPlayers: room?.players, inspectedCard, roomCode: room?.code, availableRooms,
     phase: game?.phase, round: game?.round, deckCount: game?.deckCount, firstRoundTip: guide,
     turnPlayerId: game?.turnPlayerId, playerId: me?.id, hand: game?.hand,
     selectedCard, selectedCardIndex, selectedTarget, selectedGuess, selectedKeepIndex, legalMoves: game?.legalMoves, bottomChoiceCount: game?.bottomChoiceCount,
@@ -590,11 +670,12 @@ window.render_game_to_text = () => {
 };
 window.advanceTime = () => {};
 document.addEventListener('keydown', async e => {
-  if (e.key === 'Escape' && (rulesOpen || leaveOpen)) { closeDialog(); return; }
+  if (e.key === 'Escape' && (rulesOpen || leaveOpen || settingsOpen)) { closeDialog(); return; }
   if (e.key === 'Escape' && inspectedCard !== undefined) { closeCardInspector(); return; }
   if (e.key === 'Escape' && (selectedCard !== undefined || selectedTarget !== undefined || selectedGuess !== undefined)) { backChoice(); return; }
-  if (e.key.toLowerCase() === 'f' && !['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) { if (document.fullscreenElement) await document.exitFullscreen(); else await document.documentElement.requestFullscreen(); }
+  if (!document.querySelector('[role=dialog]') && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'f' && !['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) { try { if (document.fullscreenElement) await document.exitFullscreen(); else await document.documentElement.requestFullscreen(); } catch { notify('Fullscreen is unavailable in this browser.'); } }
 });
 
+document.addEventListener('click', e => { const button = (e.target as HTMLElement).closest('button'); if (button && !button.disabled) cue('tap'); });
 render();
 if (localSolo) runLocalBots(localSolo);

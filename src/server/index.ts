@@ -22,11 +22,14 @@ io.on('connection', socket => {
   let session = service.restore(socket, socket.handshake.auth as Partial<Session>);
   if (session) socket.emit('session', session);
   const attempt = async <T>(callback: (result: Result<T>) => void, task: () => T) => {
-    try { const value = task(); await service.flush(); callback({ ok: true, value }); } catch (error) { callback({ ok: false, error: error instanceof Error ? error.message : 'Something went wrong.' }); }
+    if (typeof callback !== 'function') return;
+    try { if (session && !service.isCurrent(session, socket.id)) throw new Error('Your seat is open in another tab. Reload to reclaim it.'); const value = task(); await service.flush(); callback({ ok: true, value }); } catch (error) { callback({ ok: false, error: error instanceof Error ? error.message : 'Something went wrong.' }); }
   };
-  socket.on('room:create', (name, cb) => attempt(cb, () => { session = service.create(socket, name); socket.emit('session', session); return session; }));
-  socket.on('room:join', (input, cb) => attempt(cb, () => { session = service.join(socket, input.code, input.name); socket.emit('session', session); return session; }));
+  socket.on('room:create', (name, cb) => attempt(cb, () => { if (session) throw new Error('Leave your current table before opening another.'); session = service.create(socket, name); socket.emit('session', session); return session; }));
+  socket.on('room:join', (input, cb) => attempt(cb, () => { if (session) throw new Error('Leave your current table before joining another.'); session = service.join(socket, input.code, input.name); socket.emit('session', session); return session; }));
   socket.on('rooms:list', cb => attempt(cb, () => service.availableRooms()));
+  socket.on('room:ready', (ready, cb) => attempt(cb, () => { if (!session) throw new Error('Join a room first.'); service.ready(session, ready); return true as const; }));
+  socket.on('room:return-lobby', cb => attempt(cb, () => { if (!session) throw new Error('Join a room first.'); service.returnLobby(session); return true as const; }));
   socket.on('room:resume', cb => attempt(cb, () => { if (!session) throw new Error('That seat is no longer available.'); socket.emit('room:state', service.state(session)); return true as const; }));
   socket.on('room:react', (text, cb) => attempt(cb, () => { if (!session) throw new Error('Join a room first.'); service.react(session, text); return true as const; }));
   socket.on('room:host-decision', (continueGame, cb) => attempt(cb, () => { if (!session) throw new Error('Join a room first.'); service.decideHostMigration(session, continueGame); return true as const; }));

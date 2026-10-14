@@ -5,7 +5,7 @@ import type { HostMigration, Reaction } from '../shared/protocol.js';
 export interface RoomSnapshot {
   code: string;
   hostId: string;
-  members: { id: string; token: string; name: string; bot: boolean }[];
+  members: { id: string; token: string; name: string; bot: boolean; ready?: boolean }[];
   game?: GameState;
   reaction?: Reaction;
   reactionSequence: number;
