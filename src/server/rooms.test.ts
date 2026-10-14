@@ -263,3 +263,25 @@ test('readiness snapshots preserve seats and reject obsolete socket ownership', 
   assert.equal(restarted.isCurrent(host,socket.id),false);assert.equal(restarted.isCurrent(host,replacement.id),true);
   assert.equal(restarted.restore(socket,{roomCode:42} as unknown as Session),undefined);
 });
+
+test('Scarlet Night counts each completed match once across reconnects, rematches and snapshots', async () => {
+  const snapshots = new Map<string, RoomSnapshot>();
+  const store: RoomStore = { load: async () => [...snapshots.values()].map(s => structuredClone(s)), save: async s => { snapshots.set(s.code, structuredClone(s)); }, remove: async code => { snapshots.delete(code); } };
+  const socket = { id: 'night-host', join: () => undefined } as unknown as Parameters<RoomService['create']>[0];
+  const service = new RoomService(() => undefined, store); const session = service.create(socket, 'Night host');
+  service.addBot(session); service.start(session);
+  const game = (service as unknown as { get(code: string): { game: GameState } }).get(session.roomCode).game;
+  game.phase = 'match-over'; game.matchWinnerIds = [session.playerId]; game.players.find(p => p.id === session.playerId)!.tokens = 3;
+  service.restore(socket, session); service.restore(socket, session);
+  assert.equal(service.state(session).night?.matches, 1);
+  assert.equal(service.state(session).night?.players.find(p => p.id === session.playerId)?.wins, 1);
+  assert.equal(service.state(session).night?.players.find(p => p.id === session.playerId)?.seals, 3);
+  await service.flush(); const restored = new RoomService(() => undefined, store); await restored.load(); restored.restore(socket, session);
+  assert.equal(restored.state(session).night?.matches, 1);
+  restored.rematch(session); assert.equal(restored.state(session).night?.matches, 1);
+  const second = (restored as unknown as { get(code: string): { game: GameState } }).get(session.roomCode).game;
+  second.phase = 'match-over'; second.matchWinnerIds = [session.playerId]; second.players.find(p => p.id === session.playerId)!.tokens = 3;
+  restored.restore(socket, session); assert.equal(restored.state(session).night?.matches, 2);
+  assert.equal(restored.state(session).night?.players.find(p => p.id === session.playerId)?.seals, 6);
+  restored.returnLobby(session); assert.equal(restored.state(session).night?.matches, 2);
+});

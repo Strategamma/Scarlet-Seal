@@ -1,9 +1,10 @@
+import type { ScarletNight } from './night.js';
 import type { CardValue, GameView, Move } from './game.js';
 
 export interface LobbyPlayer { id: string; name: string; bot: boolean; connected: boolean; host: boolean; ready: boolean }
 export interface Reaction { sequence: number; playerId: string; text: 'Suspicious' | 'Nice try' | 'Case closed' }
 export interface HostMigration { formerHostId: string; candidateId?: string; approvedIds: string[] }
-export interface RoomView { code: string; players: LobbyPlayer[]; game?: GameView; canStart: boolean; reaction?: Reaction; migration?: HostMigration }
+export interface RoomView { night?: ScarletNight; code: string; players: LobbyPlayer[]; game?: GameView; canStart: boolean; reaction?: Reaction; migration?: HostMigration }
 export interface AvailableRoom { code: string; hostName: string; playerCount: number; botCount: number; maxPlayers: number }
 export interface Session { roomCode: string; playerId: string; token: string }
 

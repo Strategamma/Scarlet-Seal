@@ -59,6 +59,7 @@ let showMatchFinale = room?.game?.phase === 'match-over';
 let animatedRound = -1;
 let animatedFinale = false;
 let availableRooms: AvailableRoom[] = [];
+let tablesLoaded = false;
 let restoringSeat = Boolean(session && !localSolo);
 let restoredSeat = Boolean(localSolo);
 let joiningByCode = Boolean(new URLSearchParams(location.search).get('room'));
@@ -81,6 +82,7 @@ window.addEventListener('offline', () => socket.disconnect());
 window.addEventListener('online', () => socket.connect());
 socket.on('session', value => { if (localSolo) return; session = value; socket.auth = value; localStorage.setItem('scarlet-seal-session', JSON.stringify(value)); });
 const acceptRoomState = (value: RoomView) => {
+  if (value.night?.matches) { try { localStorage.setItem('scarlet-night-recap', JSON.stringify({ code: value.code, night: value.night })); } catch { /* Keep live results available without device storage. */ } }
   const previous = room?.game;
   const next = value.game;
   const events = gameEvents(previous, next, session?.playerId);
@@ -136,12 +138,13 @@ socket.on('room:state', value => { if (!localSolo) acceptRoomState(value); });
 window.addEventListener('pointerdown', unlockSound, { passive: true });
 window.addEventListener('keydown', unlockSound);
 socket.on('connect_error', () => { if (localSolo) return; error = 'Unable to reach the game server.'; render(); });
-socket.on('disconnect', () => { busy = false; render(); });
+socket.on('disconnect', () => { tablesLoaded = false; busy = false; render(); });
 const refreshRooms = () => {
   if (!socket.connected || room) return;
   socket.emit('rooms:list', result => {
   if (!result.ok || room) return;
-  if (JSON.stringify(availableRooms) === JSON.stringify(result.value)) return;
+  const firstScan = !tablesLoaded; tablesLoaded = true;
+  if (!firstScan && JSON.stringify(availableRooms) === JSON.stringify(result.value)) return;
   availableRooms = result.value;
   if (!rulesOpen && !settingsOpen) render();
   });
@@ -182,21 +185,6 @@ function localAction(action: (solo: LocalSolo) => void): void {
   try { action(localSolo); updateLocal(); runLocalBots(localSolo); }
   catch (reason) { error = reason instanceof Error ? reason.message : 'That move is not available.'; render(); }
 }
-const quickPlay = (name: string) => {
-  if (busy) return;
-  if (!socket.connected) {
-    localSolo = LocalSolo.create(); session = localSolo.session; socket.auth = {};
-    localStorage.removeItem('scarlet-seal-session'); localStorage.removeItem('royal-post-session');
-    updateLocal(); runLocalBots(localSolo); return;
-  }
-  emit<true>(done => socket.emit('room:create', name, created => {
-    if (!created.ok) { done(created); return; }
-    socket.emit('room:add-bot', botAdded => {
-      if (!botAdded.ok) { done(botAdded); return; }
-      socket.emit('game:start', done);
-    });
-  }));
-};
 function joinRoom(code: string): void {
   if (!validInvitation(code.trim().toUpperCase())) { error = 'Enter the five-character room code from your invitation.'; render(); return; }
   emit(cb => socket.emit('room:join', { code: code.trim().toUpperCase(), name: ensureName() }, cb));
@@ -302,20 +290,29 @@ function connectionHelp(): string {
   return `<section class="connection-guide" aria-label="Ways to play with friends"><div><button type="button" data-connection="internet" aria-pressed="${connectionGuide === 'internet'}">Over the internet</button><button type="button" data-connection="local" aria-pressed="${connectionGuide === 'local'}">Same network</button></div><p>${connectionGuide === 'internet' ? localServer ? 'This is a local server address. Internet friends need the public game address.' : 'Host a table and share its invitation link. Friends can join from anywhere with internet.' : 'Everyone opens the host computer’s LAN game address, then joins by link or code. There is no nearby-device discovery.'}</p><details data-detail="connection-guide"><summary>Connection requirements</summary><p>${connectionGuide === 'local' ? 'Run the installed game server on one computer and keep it awake. Everyone uses its LAN IP and game port. Offline LAN hosting can work without internet; guest-Wi-Fi isolation or firewalls can still block access.' : 'Everyone must use the same publicly reachable server. Localhost and private LAN links cannot invite another network.'}</p>${connectionGuide === 'internet' && localServer ? '<a href="https://scarlet-seal.onrender.com/">Open the internet-hosted game ↗</a>' : ''}</details></section>`;
 }
 
+function gameInvite(): string {
+  return `<button type="button" id="share-game" class="game-invite" aria-label="Share ${localServer ? 'the online game (separate server)' : room ? 'this table invitation' : 'the online game'}">${logo('invite-game-seal')}<span aria-hidden="true">↗</span></button>`;
+}
+function nightRecap(): string {
+  if (!room?.night?.matches) return '';
+  const night = room.night;
+  try { localStorage.setItem('scarlet-night-recap', JSON.stringify({ code: room.code, night })); } catch { /* The recap stays available when device storage is full. */ }
+  const standings = [...night.players].sort((a,b) => b.wins-a.wins || b.seals-a.seals);
+  return `<section class="night-recap"><p class="eyebrow">SCARLET NIGHT · ${night.matches} MATCH${night.matches === 1 ? '' : 'ES'}</p><h2>Tonight’s bragging rights</h2><ol>${standings.map((player,index) => `<li><span>${index === 0 ? '✦' : index+1}</span><b>${esc(player.name)}${player.bot ? ' · BOT' : ''}</b><small>${player.wins} wins · ${player.seals} seals · ${player.matches} matches</small></li>`).join('')}</ol><button type="button" id="save-night" class="secondary">Save night recap ↓</button><small>Completed matches at this table. Saved on this device; no account needed.</small></section>`;
+}
 function landing(): string {
   if (restoringSeat) return `<main class="resume-seat"><div class="crest">${logo('crest-logo')}</div><p class="eyebrow">SAVED TABLE FOUND</p><h1>Return to<br><i>your seat</i></h1><p>Reconnecting you to room ${esc(session?.roomCode ?? '')}…</p>${error ? `<p class="error" role="alert">${esc(error)}</p><button type="button" id="retry-seat" class="secondary">Try reconnecting</button>` : '<span class="resume-pulse" aria-hidden="true"></span>'}</main>`;
-  const roomRows = availableRooms.map(available => `<button type="button" class="room-row" data-join-room="${available.code}"><span class="room-identity"><b>${esc(available.hostName)}'s table</b><small>${available.code} · ${available.botCount ? `${available.botCount} bot${available.botCount === 1 ? '' : 's'}` : 'people only'}</small></span><span class="room-seats"><b>${available.playerCount}/${available.maxPlayers}</b><small>seats</small></span><span class="room-join">Sit down <i>›</i></span></button>`).join('');
+  const roomRows = availableRooms.map(available => `<button type="button" class="room-row arcade-table" ${busy || !socket.connected ? 'disabled' : ''} data-join-room="${available.code}"><span class="table-mini" aria-hidden="true">${logo('table-mini-seal')}</span><span class="room-identity"><b>${esc(available.hostName)}'s table</b><small>${available.code} · ${available.botCount ? `${available.botCount} bot${available.botCount === 1 ? '' : 's'}` : 'people only'}</small></span><span class="room-seats"><b>${available.playerCount}/${available.maxPlayers}</b><small>seats</small></span><span class="room-join">Join <i>›</i></span></button>`).join('');
   return `<main class="landing">
-    <a class="collection-link home-collection" href="https://decadenceinc.com/">← Decadence Arcade</a><div class="landing-tools">${rulesButton()}</div>
-    <section class="home-hero"><div class="crest">${logo('crest-logo')}</div><div><p class="eyebrow">A GAME OF DECEPTION &amp; DEDUCTION</p><h1>Scarlet <i>Seal</i></h1><p class="intro">One card to keep. One card to play. Claim three seals.</p></div></section>
-    <p class="entry-meta" aria-label="Game details"><span>2–6 players</span><span>Quick rounds</span><span>Learn as you play</span></p>
-    <button type="button" id="quick-play" class="primary quick-play" ${busy ? 'disabled' : ''}><span><b>Play against a bot</b><small>Start a private case now · no setup</small></span><i aria-hidden="true">›</i></button>
-    <form id="lan-form" class="lan-panel"><div class="section-heading"><div><p class="eyebrow">PLAY TOGETHER</p><h2>Share a table</h2></div><span class="live-dot">${socket.connected ? 'Connected' : 'Connecting…'}</span></div><details class="optional-name" data-detail="name"><summary>${landingName ? `Playing as ${esc(landingName)}` : 'Choose a nickname (optional)'}</summary><label>Your name<input name="name" maxlength="20" autocomplete="nickname" placeholder="We’ll suggest a detective name" value="${esc(landingName)}"></label></details>
-      <div class="entry-choices"><button type="submit" id="create-room" class="entry-choice" ${busy ? 'disabled' : ''}><span aria-hidden="true">＋</span><span><b>Host a table</b><small>Invite friends or add bots</small></span><i aria-hidden="true">›</i></button><button type="button" id="show-join-code" class="entry-choice ${joiningByCode ? 'active' : ''}" aria-expanded="${joiningByCode}" aria-controls="join-code-panel"><span aria-hidden="true">⌗</span><span><b>Join with a code</b><small>Enter the code from your host</small></span><i aria-hidden="true">${joiningByCode ? '⌄' : '›'}</i></button></div>
+    <a class="collection-link home-collection" href="https://decadenceinc.com/">← Decadence Arcade</a><div class="landing-tools">${rulesButton()}${gameInvite()}</div>
+    <section class="home-hero"><div class="arcade-card-stage" aria-hidden="true"><span class="hero-spark spark-one">✦</span><span class="hero-spark spark-two">✧</span><div class="hero-card hero-card-left">${cardFace(1)}</div><div class="hero-card hero-card-right">${cardFace(7)}</div><div class="hero-card hero-card-center">${cardFace(9)}</div><div class="hero-wax">${logo('hero-seal')}</div><span class="hero-ticket">YOUR NEXT GREAT HUNCH</span></div><div class="hero-copy"><p class="eyebrow">DECADENCE ARCADE · 2–6 PLAYERS</p><h1>Scarlet <i>Seal</i></h1><p class="hero-invitation">Bring your friends. <br>Trust your hunch.</p><p class="intro">Draw one. Play one. Outsmart the table.<br>First to three seals cracks the case.</p></div></section>
+    <p class="entry-meta" aria-label="Game details"><span>✦ Quick rounds</span><span>Friends &amp; bots</span><span>Learn as you play</span></p>
+    <form id="lan-form" class="lan-panel"><div class="section-heading"><div><p class="eyebrow">THE NEXT CASE IS YOURS</p><h2>Take a seat</h2></div><span class="live-dot">${socket.connected ? 'Connected' : 'Connecting…'}</span></div><details class="optional-name" data-detail="name"><summary>${landingName ? `Playing as ${esc(landingName)}` : 'Choose a nickname (optional)'}</summary><label>Your name<input name="name" maxlength="20" autocomplete="nickname" placeholder="We’ll suggest a detective name" value="${esc(landingName)}"></label></details>
+      <div class="nearby-heading"><b>${localServer ? 'Local host tables' : 'Online tables'}</b><small class="table-scan">${!socket.connected ? 'Connecting…' : !tablesLoaded ? 'Finding tables…' : 'Auto-refresh · 3s'}</small></div><div class="available-rooms">${roomRows || `<div class="empty-rooms"><span class="empty-table-art" aria-hidden="true">${logo('empty-table-seal')}<i>✦</i></span><b>${!socket.connected ? 'Connecting to the table server' : !tablesLoaded ? 'Looking for your crew…' : 'First here? Open a table.'}</b><small>${tablesLoaded ? 'Friends can find it here and join with one tap.' : 'Available seats will appear here.'}</small></div>`}</div>
+      <div class="table-browser-actions"><button type="submit" id="create-room" ${busy ? 'disabled' : ''}>＋ Create table</button><button type="button" id="show-join-code" aria-expanded="${joiningByCode}" aria-controls="join-code-panel">⌗ Have a code?</button></div>
       <div id="join-code-panel" class="code-join" ${joiningByCode ? '' : 'hidden'}><label>Room code<input name="code" maxlength="5" autocomplete="off" autocapitalize="characters" placeholder="ABCDE" value="${esc(landingCode)}"></label><button type="button" id="join-code" class="secondary" ${busy ? 'disabled' : ''}>Join table</button></div>
-      <div class="nearby-heading"><b>Tables on this server</b><small>${availableRooms.length ? `${availableRooms.length} waiting` : 'None waiting'}</small></div><div class="available-rooms">${roomRows || '<div class="empty-rooms"><b>No tables are waiting yet</b><small>Host one and share its invite.</small></div>'}</div>
     </form>
-    ${connectionHelp()}${error ? `<p class="error" role="alert">${esc(error)}</p>` : ''}
+    ${connectionHelp()}${localStorage.getItem('scarlet-night-recap') ? '<button type="button" id="save-night" class="night-archive">Last Scarlet Night · save recap ↓</button>' : ''}${error ? `<p class="error" role="alert">${esc(error)}</p>` : ''}
   </main>${rulesSheet()}`;
 }
 
@@ -332,7 +329,7 @@ function lobby(): string {
     if (!player) return `<div class="player-row empty-seat"><span class="seat-number">${index + 1}</span><span class="avatar" aria-hidden="true">＋</span><strong>Open seat</strong></div>`;
     return `<div class="player-row ${player.connected ? 'ready-seat' : 'offline-seat'}"><span class="seat-number">${index + 1}</span><span class="avatar" aria-hidden="true">${player.bot ? 'B' : esc(player.name[0].toUpperCase())}</span><strong>${esc(player.name)}</strong>${player.host ? '<small>HOST</small>' : ''}${player.bot ? '<small>BOT</small>' : ''}${isHost && player.bot ? `<button type="button" class="remove-bot" data-remove-bot="${player.id}" aria-label="Remove ${esc(player.name)}">×</button>` : `<span class="presence ${player.connected ? '' : 'offline'}"><i aria-hidden="true"></i>${!player.connected ? 'Offline' : player.ready ? 'Ready' : 'Not ready'}</span>`}</div>`;
   }).join('');
-  return `<main class="lobby"><header>${leaveButton()}<span class="brand">${logo('mini-crest')}<span>Scarlet Seal</span></span>${rulesButton('Rules')}</header>${connectionNotice()}<section class="lobby-next"><button type="button" id="ready" class="${me?.ready ? 'secondary' : 'primary'}" aria-pressed="${!!me?.ready}" ${busy ? 'disabled' : ''}>${me?.ready ? 'Ready ✓ · tap to unready' : 'I’m ready'}</button><div class="lobby-actions">${room!.canStart ? isHost ? `<button type="button" id="start" class="primary" ${busy ? 'disabled' : ''}>Start ${startingCount}-player game →</button>` : '<p class="waiting-host"><span aria-hidden="true">◌</span> Waiting for the host to start</p>' : `<p class="waiting-host">${isHost ? room!.players.length < 2 ? 'Invite a friend or add a bot to start.' : 'Waiting for everyone to mark ready.' : me?.ready ? 'You’re ready. Waiting for the host…' : 'Mark ready when you’re settled in.'}</p>`}<small>${absentCount ? 'Offline seats leave when the game starts. A bot fills the second seat if needed.' : 'Draw one, play one, keep one. First to three seals wins.'}</small></div></section>
+  return `<main class="lobby"><header>${leaveButton()}<span class="brand">${logo('mini-crest')}<span>Scarlet Seal</span></span>${gameInvite()}${rulesButton('Rules')}</header>${connectionNotice()}<section class="lobby-next"><button type="button" id="ready" class="${me?.ready ? 'secondary' : 'primary'}" aria-pressed="${!!me?.ready}" ${busy ? 'disabled' : ''}>${me?.ready ? 'Ready ✓ · tap to unready' : 'I’m ready'}</button><div class="lobby-actions">${room!.canStart ? isHost ? `<button type="button" id="start" class="primary" ${busy ? 'disabled' : ''}>Start ${startingCount}-player game →</button>` : '<p class="waiting-host"><span aria-hidden="true">◌</span> Waiting for the host to start</p>' : `<p class="waiting-host">${isHost ? room!.players.length < 2 ? 'Invite a friend or add a bot to start.' : 'Waiting for everyone to mark ready.' : me?.ready ? 'You’re ready. Waiting for the host…' : 'Mark ready when you’re settled in.'}</p>`}<small>${absentCount ? 'Offline seats leave when the game starts. A bot fills the second seat if needed.' : 'Draw one, play one, keep one. First to three seals wins.'}</small></div></section>
     ${returnRecap()}<section class="room-code"><p class="eyebrow">INVITE YOUR CREW</p><button type="button" id="share" class="${room!.canStart ? 'secondary' : 'primary'}">${uiIcon('invite')} Invite friends</button><p class="room-code-fallback">Room code <b>${room!.code}</b></p><label>Or copy the invitation link<input id="invite-link" readonly value="${esc(share)}"></label><p class="connection-help">${location.hostname === 'localhost' || location.hostname === '127.0.0.1' ? 'This link opens only on this computer. Open the host’s LAN URL before inviting nearby friends.' : localServer ? 'Friends must reach this server on your local network. Keep the host computer awake.' : 'Share this link with friends anywhere. Everyone needs internet.'}</p></section>
     <section class="players"><div class="seat-heading"><div><p class="eyebrow">PLAYERS &amp; BOTS</p><h3>At the table</h3></div><span>${room!.players.length} / ${MAX_PLAYERS} seats</span></div><div class="lobby-seats">${seats}</div></section>
     ${isHost ? `<section class="seat-controls"><div><strong>Fill an empty seat</strong><small>${humanCount} ${humanCount === 1 ? 'person' : 'people'} · ${botCount} ${botCount === 1 ? 'bot' : 'bots'}</small></div><button type="button" id="add-bot" class="add-bot" ${room!.players.length >= MAX_PLAYERS || busy ? 'disabled' : ''}><span>＋</span>Add bot</button></section>` : ''}
@@ -353,7 +350,7 @@ function matchFinale(): string {
   const bonus = game.roundSummary?.awards.some(award => award.source === 'wiretap' && game.matchWinnerIds.includes(award.playerId));
   const isHost = room!.players.some(player => player.id === meId && player.host);
   const confetti = Array.from({ length: 32 }, (_, index) => `<i style="left:${(index * 37) % 96}%;animation-delay:${index * 35}ms" aria-hidden="true"></i>`).join('');
-  return `<main class="match-finale ${animateFinale ? 'animate' : ''}"><header>${leaveButton()}<span class="table-brand">${logo('mini-crest')}<b>Scarlet Seal</b></span>${rulesButton('Rules')}</header>${connectionNotice()}${returnRecap()}<section class="finale-stage" aria-labelledby="finale-title"><div class="round-confetti" aria-hidden="true">${confetti}</div><p class="eyebrow">CASE CLOSED · ROUND ${game.round}</p>${logo('finale-seal')}<h1 id="finale-title" tabindex="-1">${esc(champion)} ${verb}!</h1><p class="finale-subtitle">${game.matchWinnerIds.includes(meId) ? 'You cracked the case.' : `${esc(leader?.name ?? 'The winner')} cracked the case.`}</p><div class="finale-score"><span>${seal()}<strong>${leader?.tokens ?? tokenTarget(game.players.length)}</strong></span><b>seals collected</b></div><p class="finale-reason">${esc(game.roundSummary?.reason ?? `Final round: ${roundWinners} won.`)} ${bonus ? 'A Wiretap bonus seal helped decide the match.' : ''}</p><div class="finale-actions">${isHost ? `<button type="button" id="rematch" class="primary" ${busy ? 'disabled' : ''}>Rematch · same crew ↻</button>` : '<p>Waiting for the host to play again…</p>'}${isHost && !localSolo ? '<button type="button" id="return-lobby" class="secondary">Invite more friends</button>' : ''}<button type="button" id="finish-home" class="secondary">Leave table</button></div><div class="finale-standings"><h2>Final standings</h2><ol class="finale-leaderboard">${sealTrack}</ol></div></section>${error ? `<p class="error">${esc(error)}</p>` : ''}</main>${rulesSheet()}${leaveSheet()}`;
+  return `<main class="match-finale ${animateFinale ? 'animate' : ''}"><header>${leaveButton()}<span class="table-brand">${logo('mini-crest')}<b>Scarlet Seal</b></span>${gameInvite()}${rulesButton('Rules')}</header>${connectionNotice()}${returnRecap()}<section class="finale-stage" aria-labelledby="finale-title"><div class="round-confetti" aria-hidden="true">${confetti}</div><p class="eyebrow">CASE CLOSED · ROUND ${game.round}</p>${logo('finale-seal')}<h1 id="finale-title" tabindex="-1">${esc(champion)} ${verb}!</h1><p class="finale-subtitle">${game.matchWinnerIds.includes(meId) ? 'You cracked the case.' : `${esc(leader?.name ?? 'The winner')} cracked the case.`}</p><div class="finale-score"><span>${seal()}<strong>${leader?.tokens ?? tokenTarget(game.players.length)}</strong></span><b>seals collected</b></div><p class="finale-reason">${esc(game.roundSummary?.reason ?? `Final round: ${roundWinners} won.`)} ${bonus ? 'A Wiretap bonus seal helped decide the match.' : ''}</p><div class="finale-actions">${isHost ? `<button type="button" id="rematch" class="primary" ${busy ? 'disabled' : ''}>Rematch · same crew ↻</button>` : '<p>Waiting for the host to play again…</p>'}${isHost && !localSolo ? '<button type="button" id="return-lobby" class="secondary">Invite more friends</button>' : ''}<button type="button" id="finish-home" class="secondary">Leave table</button></div>${nightRecap()}<div class="finale-standings"><h2>Final standings</h2><ol class="finale-leaderboard">${sealTrack}</ol></div></section>${error ? `<p class="error">${esc(error)}</p>` : ''}</main>${rulesSheet()}${leaveSheet()}`;
 }
 
 function game(): string {
@@ -468,6 +465,7 @@ function render(): void {
   const discardScroll = root.querySelector<HTMLElement>('.discard-lanes')?.scrollLeft ?? 0;
   root.innerHTML = (!room ? landing() : room.game ? game() : lobby()) + preferencesSheet();
   const header = root.querySelector('.landing-tools') ?? root.querySelector('.table-header nav') ?? root.querySelector('main>header');
+  if (room && !root.querySelector('#share-game')) header?.insertAdjacentHTML('beforeend', gameInvite());
   header?.insertAdjacentHTML('beforeend', `<button id="open-settings" class="settings-button" aria-label="Table preferences">${uiIcon('settings')}</button>`);
   if (room) root.querySelector('main')?.insertAdjacentHTML('beforeend', '<a class="collection-link" href="https://decadenceinc.com/">← Arcade collection</a>');
   if (room && landingCode && room.code !== landingCode) root.querySelector('main')?.insertAdjacentHTML('afterbegin', `<p class="connection-notice">Your invitation is for ${esc(landingCode)}. Leave this table to follow it.</p>`);
@@ -570,7 +568,6 @@ function bind(): void {
   lanForm?.querySelector<HTMLInputElement>('input[name=code]')?.addEventListener('input', event => { landingCode = (event.currentTarget as HTMLInputElement).value.toUpperCase(); });
 
   lanForm?.addEventListener('submit', e => { e.preventDefault(); emit(cb => socket.emit('room:create', ensureName(), cb)); });
-  document.querySelector('#quick-play')?.addEventListener('click', () => quickPlay(landingName || 'You'));
   document.querySelector('#join-code')?.addEventListener('click', () => { const code = lanForm?.querySelector<HTMLInputElement>('input[name=code]'); if (!code?.value.trim()) { code?.focus(); code?.setCustomValidity('Enter a room code.'); code?.reportValidity(); code?.setCustomValidity(''); return; } joinRoom(code.value); });
   document.querySelectorAll<HTMLElement>('[data-join-room]').forEach(el => el.addEventListener('click', () => joinRoom(el.dataset.joinRoom!)));
   document.querySelector('#add-bot')?.addEventListener('click', () => emit(cb => socket.emit('room:add-bot', cb)));
@@ -582,6 +579,18 @@ function bind(): void {
   document.querySelector('#next-round')?.addEventListener('click', () => localSolo ? localAction(solo => solo.nextRound()) : emit(cb => socket.emit('game:next-round', cb)));
   document.querySelector('#rematch')?.addEventListener('click', () => localSolo ? localAction(solo => solo.rematch()) : emit(cb => socket.emit('game:rematch', cb)));
   document.querySelectorAll<HTMLElement>('[data-reaction]').forEach(el => el.addEventListener('click', () => emit(cb => socket.emit('room:react', el.dataset.reaction as 'Suspicious' | 'Nice try' | 'Case closed', cb))));
+  document.querySelector('#save-night')?.addEventListener('click', () => {
+    let saved; try { saved = JSON.parse(localStorage.getItem('scarlet-night-recap') ?? 'null'); } catch { notify('No saved night recap is available.'); return; }
+    const recap = room?.night ? { code: room.code, night: room.night } : saved;
+    if (!recap?.night?.players) return;
+    const text = `SCARLET NIGHT · Table ${recap.code}\n${recap.night.matches} completed matches\n` + [...(recap.night.players as NonNullable<RoomView['night']>['players'])].sort((a,b)=>b.wins-a.wins || b.seals-a.seals).map(p=>`${p.name}${p.bot ? ' (bot)' : ''}: ${p.wins} wins · ${p.seals} seals · ${p.matches} matches`).join('\n');
+    const url = URL.createObjectURL(new Blob([text], {type:'text/plain'})); const link = document.createElement('a'); link.href = url; link.download = 'scarlet-night.txt'; link.click(); setTimeout(()=>URL.revokeObjectURL(url),1000);
+  });
+  document.querySelector('#share-game')?.addEventListener('click', async () => {
+    const url = localServer ? 'https://scarlet-seal.onrender.com/' : room ? joinLink(location.origin, room.code) : location.origin;
+    try { if(navigator.share) await navigator.share({title:'Scarlet Seal',url}); else { await navigator.clipboard.writeText(url); notify(localServer ? 'Online game link copied. It opens a separate server from this LAN table.' : 'Invitation copied.'); } }
+    catch(reason) { if(reason instanceof DOMException && reason.name==='AbortError') return; notify(`Copy this invitation: ${url}`); }
+  });
   document.querySelector('#share')?.addEventListener('click', async () => {
     const data = { title: 'Join my Scarlet Seal room', text: `Join room ${room!.code}`, url: joinLink(location.origin, room!.code) };
     try {
@@ -660,7 +669,7 @@ window.render_game_to_text = () => {
   const guide = game && me && showFirstRoundTips && game.round === 1 ? turnPresentation(game, me.id, selectedCard, selectedTarget, selectedGuess).tip : undefined;
   return JSON.stringify({
     coordinateSystem: 'DOM interface ordered top-to-bottom; no spatial playfield',
-    screen: !room ? 'home' : !game ? 'lobby' : game.phase === 'match-over' && showMatchFinale ? 'match-finale' : 'game', connected: socket.connected, offlineSolo: Boolean(localSolo), migration: room?.migration, rulesOpen, leaveOpen, settingsOpen, lobbyPlayers: room?.players, inspectedCard, roomCode: room?.code, availableRooms,
+    screen: !room ? 'home' : !game ? 'lobby' : game.phase === 'match-over' && showMatchFinale ? 'match-finale' : 'game', connected: socket.connected, offlineSolo: Boolean(localSolo), migration: room?.migration, rulesOpen, leaveOpen, settingsOpen, lobbyPlayers: room?.players, inspectedCard, roomCode: room?.code, night: room?.night, availableRooms,
     phase: game?.phase, round: game?.round, deckCount: game?.deckCount, firstRoundTip: guide,
     turnPlayerId: game?.turnPlayerId, playerId: me?.id, hand: game?.hand,
     selectedCard, selectedCardIndex, selectedTarget, selectedGuess, selectedKeepIndex, legalMoves: game?.legalMoves, bottomChoiceCount: game?.bottomChoiceCount,

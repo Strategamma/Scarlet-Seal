@@ -24,3 +24,10 @@ The earlier parent-copy performance numbers and 30-second eviction policy do not
 No new deployment, actual multi-device Wi-Fi, current upgraded internet match, actual PostgreSQL database restart, iOS/Safari, native share sheet, physical keyboard/safe-area/haptics hardware, screen-reader session, or listening/mix-quality test was performed. PostgreSQL behavior is regression-tested through the existing snapshot-store boundary; live SQL verification remains required before release. Existing service-worker offline caching is exercised; native PWA installation remains unverified. Rare rules have automated coverage; not every rare visual outcome was forced. Timing/CPU claims from the removed copy are not reused.
 
 Before release, deploy this checkout and run internet matches/rematches plus physical-device local/offline-hosting checks. PostgreSQL must use a durable plan/backups if long-term availability is promised.
+
+## Table browser and Scarlet Night — 2026-10-15
+- 59 tests passed; build passed. New server test verifies once-only match accounting, optional snapshot restoration, rematch totals and lobby reopening.
+- Separate Chrome contexts automatically discover one server’s table, tap Join once, complete two synchronized matches, retain totals across rematch, save device recap and trigger text download; host migration/reconnect and invalid invitations exercised.
+- Table browser screenshots at 320×568, 390×844, 844×390, 768×1024 and 1440×900; overflow, reduced motion and public-link clipboard checks pass. Narrow-table card layout corrected and retested. No page errors.
+- Local icon copies public game URL on a separate server; local lobby invitation still uses actual LAN origin. No cross-server discovery or relay implemented.
+- No physical-device LAN, deployed internet, native share-sheet, or real PostgreSQL validation. Memory-only rooms/totals reset on server restart; latest device recap is exportable. Evidence: ignored `output/experience/night-playtest.mjs`, `table-browser-check.mjs`, `table-browser-*.png`, `results-phone.png`.

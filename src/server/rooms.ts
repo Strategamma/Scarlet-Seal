@@ -1,3 +1,4 @@
+import { recordNightMatch, type ScarletNight } from '../shared/night.js';
 import { randomBytes } from 'node:crypto';
 import type { Socket } from 'socket.io';
 import { chooseBotMove, chooseBotReturns, createGame, forfeitPlayer, MAX_PLAYERS, playCard, returnCardsToBottom, startRound, viewFor, type CardValue, type GameState, type Move } from '../shared/game.js';
@@ -6,7 +7,7 @@ import type { RoomSnapshot, RoomStore } from './room-store.js';
 
 type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
 interface Member { id: string; token: string; name: string; bot: boolean; connected: boolean; ready: boolean; socketId?: string }
-interface Room { code: string; hostId: string; members: Member[]; game?: GameState; botTimer?: NodeJS.Timeout; reaction?: Reaction; reactionSequence: number; migration?: HostMigration }
+interface Room { night?: ScarletNight; nightRecorded?: boolean; code: string; hostId: string; members: Member[]; game?: GameState; botTimer?: NodeJS.Timeout; reaction?: Reaction; reactionSequence: number; migration?: HostMigration }
 
 const rooms = new Map<string, Room>();
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -54,7 +55,7 @@ export class RoomService {
   private queueSave(room: Room): void {
     if (!this.store) return;
     const snapshot: RoomSnapshot = {
-      code: room.code, hostId: room.hostId,
+      code: room.code, hostId: room.hostId, night: room.night, nightRecorded: room.nightRecorded,
       members: room.members.map(({ id, token, name, bot, ready }) => ({ id, token, name, bot, ready })),
       game: room.game ? structuredClone(room.game) : undefined,
       reaction: room.reaction, reactionSequence: room.reactionSequence,
@@ -177,6 +178,7 @@ export class RoomService {
     if (room.members.some(player => !player.bot && player.connected && !player.ready)) throw new Error('Wait for everyone to mark ready.');
     room.members = room.members.filter(player => player.bot || player.connected);
     if (room.members.length < 2) this.addBotMember(room);
+    room.nightRecorded = false;
     room.game = createGame(room.members.map(m => ({ id: m.id, name: m.name, bot: m.bot })));
     this.push(room); this.scheduleBot(room);
   }
@@ -190,6 +192,7 @@ export class RoomService {
     room.members = room.members.filter(player => player.bot || player.connected);
     if (room.members.length < 2) this.addBotMember(room);
     room.reaction = undefined;
+    room.nightRecorded = false;
     room.game = createGame(room.members.map(player => ({ id: player.id, name: player.name, bot: player.bot })));
     this.push(room); this.scheduleBot(room);
   }
@@ -319,7 +322,7 @@ export class RoomService {
   }
   private view(room: Room, playerId: string): RoomView {
     return {
-      code: room.code,
+      code: room.code, night: room.night,
       players: room.members.map(m => ({ id: m.id, name: m.name, bot: m.bot, connected: m.connected, host: m.id === room.hostId, ready: m.ready })),
       game: room.game ? viewFor(room.game, playerId) : undefined,
       canStart: room.hostId === playerId && !room.game && !room.migration && room.members.length >= 2 && room.members.every(m => m.bot || !m.connected || m.ready),
@@ -328,6 +331,10 @@ export class RoomService {
     };
   }
   private push(room: Room): void {
+    room.night ??= { startedAt: new Date().toISOString(), matches: 0, players: [] };
+    if (room.game?.phase === 'match-over' && !room.nightRecorded) {
+      room.night = recordNightMatch(room.night, room.game); room.nightRecorded = true;
+    }
     this.queueSave(room);
     for (const member of room.members) if (!member.bot && member.socketId) this.emitToSocket(member.socketId, 'room:state', this.view(room, member.id));
   }

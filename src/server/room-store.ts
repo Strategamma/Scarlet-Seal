@@ -1,8 +1,11 @@
+import type { ScarletNight } from '../shared/night.js';
 import { Pool } from 'pg';
 import type { GameState } from '../shared/game.js';
 import type { HostMigration, Reaction } from '../shared/protocol.js';
 
 export interface RoomSnapshot {
+  night?: ScarletNight;
+  nightRecorded?: boolean;
   code: string;
   hostId: string;
   members: { id: string; token: string; name: string; bot: boolean; ready?: boolean }[];

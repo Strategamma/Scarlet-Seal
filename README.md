@@ -58,3 +58,10 @@ The **Over the internet** and **Same network** tabs explain connection requireme
 Preferences control sound, quiet motion and optional supported haptics. System reduced motion always applies. Help/preferences isolate input but do not pause multiplayer. The illustrated card atlas remains cached because this canonical version uses it, including offline solo.
 
 All edits/builds/Git commands belong in this nested `Scarlet-Seal` repository. The outer duplicate source/package/build were removed. See [canonical verification](docs/EXPERIENCE_VERIFICATION.md).
+
+### Table browser and Scarlet Night
+Available tables refresh automatically every three seconds on the server you opened. Tap **Join** once to take a seat; use the small **Create table** button if none are waiting. Wi-Fi and LAN are the same local-network path: browsers cannot scan other host computers. Everyone must first open the same host LAN address (or the same public game URL).
+
+The small seal/share icon copies or shares the online game. On a local host it shares the public game as a **separate server**, not the local room. The lobby’s **Invite friends** control shares the current room’s actual local or public invitation.
+
+**Scarlet Night** tracks completed matches, wins and seals at a table across rematches and lobby reopening. Bots are labeled. Results show the night leaderboard and a downloadable text recap; the latest recap remains accessible on this device’s home screen. No account or SQL is required. Live totals reset with the memory-only server; device storage can be cleared, so download the recap to keep it. These are friendly table bragging rights, not authenticated global rankings.
