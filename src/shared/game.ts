@@ -21,7 +21,7 @@ export interface Player {
   id: string; name: string; hand: CardValue[]; discards: CardValue[];
   tokens: number; protected: boolean; eliminated: boolean; connected: boolean; bot: boolean;
 }
-export interface PublicAction { sequence: number; actorId: string; card: CardValue; targetId?: string; guess?: CardValue; resolution: string }
+export interface PublicAction { sequence: number; actorId: string; card: CardValue; targetId?: string; guess?: CardValue; resolution: string; eliminatedIds?: string[] }
 export interface GameState {
   phase: 'lobby' | 'playing' | 'round-over' | 'match-over';
   players: Player[]; deck: CardValue[]; setAside?: CardValue; faceUpRemoved: CardValue[];
@@ -132,6 +132,7 @@ function sameMove(a: Move, b: Move): boolean { return a.card === b.card && a.tar
 export function playCard(state: GameState, playerId: string, move: Move, rng = Math.random): void {
   const legal = legalMoves(state, playerId);
   if (!legal.some(candidate => sameMove(candidate, move))) throw new Error('That move is not legal.');
+  const alreadyOut = new Set(state.players.filter(player => player.eliminated).map(player => player.id));
   const actor = current(state);
   const index = actor.hand.indexOf(move.card);
   actor.hand.splice(index, 1); actor.discards.push(move.card);
@@ -188,6 +189,7 @@ export function playCard(state: GameState, playerId: string, move: Move, rng = M
     action.resolution = 'Red Herring was discarded with no immediate effect.';
   } else if (move.card === 9) { eliminate(state, actor, 'Scarlet Evidence was played'); action.resolution = `${actor.name} exposed Scarlet Evidence and was eliminated.`; }
 
+  action.eliminatedIds = state.players.filter(player => player.eliminated && !alreadyOut.has(player.id)).map(player => player.id);
   finishTurn(state, rng);
 }
 

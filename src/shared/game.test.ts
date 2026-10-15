@@ -91,7 +91,7 @@ test('Hunch can identify the zero-value Wiretap', () => {
   assert.equal(state.players[1].eliminated, true);
   assert.equal(state.phase, 'round-over');
   assert.match(state.log[1], /Ada played Hunch on Bea/);
-  assert.deepEqual(state.lastAction, { sequence: 1, actorId: 'a', card: 1, targetId: 'b', guess: 0, resolution: 'Correct: Bea was eliminated.' });
+  assert.deepEqual(state.lastAction, { sequence: 1, actorId: 'a', card: 1, targetId: 'b', guess: 0, resolution: 'Correct: Bea was eliminated.', eliminatedIds: ['b'] });
   assert.equal(state.roundSummary?.reason, 'Ada was the last investigator still in the case.');
   assert.deepEqual(state.roundSummary?.reveals, [{ playerId: 'a', card: 4 }]);
 });
@@ -231,4 +231,21 @@ test('leaving on your turn forfeits and advances the game', () => {
   assert.equal(state.players[0].eliminated, true);
   assert.equal(state.phase, 'round-over');
   assert.match(state.log.at(-2)!, /left the case/);
+});
+
+
+test('public elimination attribution covers losing comparisons and exposed evidence', () => {
+  for (const scenario of [
+    { hand: [3, 0], other: 8, move: { card: 3, targetId: 'b' }, victim: 'a' },
+    { hand: [5, 4], other: 9, move: { card: 5, targetId: 'b' }, victim: 'b' },
+    { hand: [9, 4], other: 2, move: { card: 9 }, victim: 'a' }
+  ] as const) {
+    const state = game(); setTurn(state, [...scenario.hand], scenario.other);
+    playCard(state, 'a', scenario.move, () => 0);
+    assert.deepEqual(viewFor(state, 'a').publicActions.at(-1)?.eliminatedIds, [scenario.victim]);
+    assert.deepEqual(viewFor(state, 'b').publicActions.at(-1)?.eliminatedIds, [scenario.victim]);
+  }
+  const state = game(); setTurn(state, [4, 2], 3);
+  playCard(state, 'a', { card: 4 }, () => 0);
+  assert.deepEqual(state.lastAction?.eliminatedIds, []);
 });

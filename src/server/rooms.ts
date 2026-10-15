@@ -353,6 +353,6 @@ export class RoomService {
       this.push(room);
       try { await this.flush(); this.scheduleBot(room); }
       catch (error) { console.error('Could not save bot turn:', error); }
-    }, 700);
+    }, 3200);
   }
 }

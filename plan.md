@@ -1,7 +1,7 @@
-# Tables and Scarlet Night
-- Goal: discover/join tables quickly and celebrate a shared night.
-- Scope: server table browser, small creation/code controls, compact sharing, authoritative night totals and downloadable device recap.
-- Approach: reuse Socket.IO listing; same-server discovery only. Count completed matches once, retain across rematches/reopen/reconnect and optional snapshots.
-- Risks: no cross-server Wi-Fi discovery; local invitations cannot reach internet; memory-only server resets, device archives can be cleared.
-- Verification: stats idempotence/persistence tests, build, separate-client table discovery/join, bots/start, responsive and sharing fallback checks.
-- Outcome: 59 tests/build pass. Two separate clients discover/join, finish two matches, migrate host/reconnect, rematch/reopen; night totals/archive/download verified. Five responsive browser sizes and local/public clipboard distinction pass. Physical LAN, live internet deployment and native sharing remain unverified.
+# Contained, readable game page
+- Goal: keep every card, label, choice and replay control legible inside the game page.
+- Scope: card faces, compact hand/review layout, player seats, action panels and round summaries.
+- Approach: replace inherited portrait-era card geometry with isolated text-first components; consolidate the gameplay stylesheet; reserve space for each game region and use bounded in-game choice panels.
+- Risks: six long player names, three-card review, nine guesses, short landscape, results and safe areas.
+- Verification: tests/build; browser screenshots plus element/text bounds in normal turns, review, target/guess/confirm, elimination and results at narrow, standard and landscape sizes.
+- Outcome: 60 tests and build pass. Twenty visual fixture cases (five states × four sizes) passed text/panel bounds and non-overlap checks. Review selection/submission, target/guess flow, risk confirmation/Back, focus containment and replay verified. Standalone runner lacks Chromium; in-app browser supplied screenshot evidence. Physical devices and deployment remain unverified.
